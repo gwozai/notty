@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useRef, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useAdapter } from "./adapter-context";
 import { useAuth } from "./auth-context";
@@ -7,6 +7,7 @@ import type { MediaItem } from "@/lib/adapter";
 type MediaContextType = {
     media: MediaItem[];
     loading: boolean;
+    ensureLoaded: () => void;
     uploadMedia: (file: File, dimensions?: { width: number; height: number }) => Promise<MediaItem>;
     deleteMedia: (id: string) => Promise<void>;
     publishMedia: (id: string, published: boolean) => Promise<void>;
@@ -21,9 +22,11 @@ export function MediaProvider({ children }: { children: ReactNode }) {
     const { user } = useAuth();
     const adapter = useAdapter();
     const [media, setMedia] = useState<MediaItem[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(false);
+    const loadedRef = useRef(false);
 
     const fetchMedia = useCallback(async () => {
+        setLoading(true);
         try {
             const items = await adapter.getMedia();
             setMedia(items);
@@ -34,8 +37,9 @@ export function MediaProvider({ children }: { children: ReactNode }) {
         }
     }, [adapter]);
 
-    useEffect(() => {
-        if (!user) return;
+    const ensureLoaded = useCallback(() => {
+        if (!user || loadedRef.current) return;
+        loadedRef.current = true;
         fetchMedia();
     }, [user, fetchMedia]);
 
@@ -51,20 +55,23 @@ export function MediaProvider({ children }: { children: ReactNode }) {
     }, [adapter]);
 
     const publishMedia = useCallback(async (id: string, published: boolean) => {
-        setMedia((prev) => prev.map((m) => m.id === id ? { ...m, published: published ? 1 : 0 } : m));
+        setMedia((prev) => prev.map((m) => (m.id === id ? { ...m, published } : m)));
         await adapter.publishMedia(id, published);
-        toast(published ? "Made public" : "Made private");
+        toast(published ? "Published to your public page" : "Unpublished");
     }, [adapter]);
 
     const updateCaption = useCallback(async (id: string, caption: string) => {
-        setMedia((prev) => prev.map((m) => m.id === id ? { ...m, caption } : m));
+        setMedia((prev) => prev.map((m) => (m.id === id ? { ...m, caption } : m)));
         await adapter.updateMediaCaption(id, caption);
     }, [adapter]);
 
     const getMediaUrl = useCallback((id: string) => adapter.getMediaUrl(id), [adapter]);
 
     return (
-        <MediaContext.Provider value={{ media, loading, uploadMedia, deleteMedia, publishMedia, updateCaption, getMediaUrl, revalidate: fetchMedia }}>
+        <MediaContext.Provider value={{
+            media, loading, ensureLoaded, uploadMedia, deleteMedia, publishMedia, updateCaption, getMediaUrl,
+            revalidate: fetchMedia,
+        }}>
             {children}
         </MediaContext.Provider>
     );

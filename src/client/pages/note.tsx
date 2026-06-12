@@ -130,7 +130,7 @@ export function NotePage() {
     const { notes, saveNote } = useNotes();
     const { folders, selectFolder } = useFolders();
     const adapter = useAdapter();
-    const { user, loading: authLoading } = useAuth();
+    const { user, loading: authLoading, failed: authFailed, retry: retryAuth } = useAuth();
     const shareToken = searchParams.get("share") || undefined;
 
     // Only pass folder_id on first save (new note) — undefined means "don't change"
@@ -295,6 +295,23 @@ export function NotePage() {
     }
 
     if (noteState === "checking") {
+        // Auth never resolved a user — don't spin forever, tell the user.
+        if (authFailed) {
+            return (
+                <div className="min-h-screen bg-[var(--color-paper)] flex flex-col items-center justify-center gap-4 p-8 text-center">
+                    <p className="font-serif text-xl text-[var(--color-ink)]">Couldn't load this note</p>
+                    <p className="text-sm text-[var(--color-ink-muted)] max-w-sm">
+                        We couldn't sign you in, so this note can't be opened right now.
+                    </p>
+                    <button
+                        onClick={retryAuth}
+                        className="px-4 py-2 rounded-lg bg-[var(--color-ink)] text-[var(--color-paper)] text-sm font-medium"
+                    >
+                        Retry
+                    </button>
+                </div>
+            );
+        }
         return (
             <div className="min-h-screen bg-[var(--color-paper)] flex items-center justify-center">
                 <div className="text-sm text-[var(--color-ink-muted)]">Loading...</div>

@@ -4,22 +4,18 @@ import { TabBar } from "./tab-bar";
 import { CommandPalette } from "./command-palette";
 import { ShortcutsHelp } from "./shortcuts-help";
 import { useFolders } from "@/context/folders-context";
-import { useSmfs } from "@/context/smfs-context";
 import { useHotkeys } from "@/lib/hotkeys";
 import { toggleDarkMode } from "@/lib/dark-mode";
 import { isTauri } from "@/lib/platform";
-import { SmfsRightPanel } from "@/components/smfs-panel";
 
 export function AppLayout({ children }: { children: ReactNode }) {
     const { folders, selectedFolderId } = useFolders();
     const folder = folders.find((f) => f.id === selectedFolderId);
-    const smfs = useSmfs();
     const [sidebarVisible, setSidebarVisible] = useState(() => window.innerWidth >= 768);
 
     useHotkeys([
         { key: "mod+\\", handler: () => setSidebarVisible((v) => !v), allowInInput: true },
         { key: "mod+d", handler: toggleDarkMode, allowInInput: true },
-        { key: "mod+shift+f", handler: () => smfs.togglePanel(), allowInInput: true },
     ]);
 
     const style: CSSProperties | undefined = folder?.color
@@ -32,7 +28,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
     return (
         <div className="flex h-screen overflow-hidden transition-colors duration-300" style={style}>
-            {/* Sidebar — fixed overlay on mobile, static on desktop */}
             {sidebarVisible && (
                 <>
                     <div className="md:hidden fixed inset-0 z-40 bg-black/30" onClick={() => setSidebarVisible(false)} />
@@ -45,9 +40,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 className="flex-1 overflow-y-auto transition-colors duration-300 min-w-0"
                 style={{ backgroundColor: folder?.color ? "var(--folder-tint)" : "var(--color-paper)" }}
             >
-                {/* Tab bar (Tauri) or plain drag region */}
                 {isTauri && <TabBar />}
-                {/* Mobile menu button */}
                 {!sidebarVisible && (
                     <button
                         onClick={() => setSidebarVisible(true)}
@@ -59,7 +52,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 )}
                 {children}
             </main>
-            <SmfsRightPanel />
             <CommandPalette />
             <ShortcutsHelp />
         </div>

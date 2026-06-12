@@ -3,6 +3,7 @@ import { useAdapter } from "./adapter-context";
 import { useAuth } from "./auth-context";
 import { toast } from "sonner";
 import type { Note } from "@/lib/adapter";
+import { sortNotesByUpdated } from "@/lib/note-file-utils";
 
 export type { Note };
 
@@ -25,6 +26,7 @@ type NotesContextType = {
     saveNote: (id: string, title: string, content: string, folderId?: string | null) => Promise<void>;
     moveNoteToFolder: (noteId: string, folderId: string | null) => void;
     setNoteSyncMode: (noteId: string, mode: "cloud" | "local") => void;
+    loadTrash: (force?: boolean) => void;
     revalidate: () => Promise<void>;
 };
 
@@ -32,22 +34,19 @@ const NotesContext = createContext<NotesContextType | null>(null);
 
 const UNDO_DELAY_MS = 5000;
 
-function sortByUpdated(notes: Note[]): Note[] {
-    return notes.sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
-}
-
 export function NotesProvider({ children }: { children: ReactNode }) {
-    const { user } = useAuth();
+    const { user, loading: authLoading } = useAuth();
     const adapter = useAdapter();
     const [notes, setNotes] = useState<Note[]>([]);
     const [trash, setTrash] = useState<Note[]>([]);
     const [loading, setLoading] = useState(true);
     const localEditsRef = useRef<Map<string, Note>>(new Map());
     const pendingDeleteRef = useRef<Map<string, PendingDelete>>(new Map());
+    const trashLoadedRef = useRef(false);
 
     const fetchNotes = useCallback(async () => {
         try {
-            const serverNotes = await adapter.getNotes();
+            const serverNotes = await adapter.getNotesList();
             setNotes((prev) => {
                 const merged = new Map<string, Note>();
                 for (const n of serverNotes) merged.set(n.id, n);
@@ -62,23 +61,45 @@ export function NotesProvider({ children }: { children: ReactNode }) {
                 for (const id of pendingDeleteRef.current.keys()) {
                     merged.delete(id);
                 }
-                return sortByUpdated(Array.from(merged.values()));
+                return sortNotesByUpdated(Array.from(merged.values()));
             });
         } catch (e) {
             console.error("Failed to fetch notes:", e);
         } finally {
             setLoading(false);
         }
+    }, [adapter]);
 
+    useEffect(() => {
+        if (!user) {
+            // Auth settled without a user (sign-in failed) — stop the skeleton
+            // so the page renders its empty/error state instead of spinning.
+            if (!authLoading) setLoading(false);
+            return;
+        }
+
+        let cancelled = false;
+        (async () => {
+            if (adapter.getCachedNotesList) {
+                const cached = await adapter.getCachedNotesList();
+                if (!cancelled && cached.length > 0) {
+                    setNotes(sortNotesByUpdated(cached));
+                    setLoading(false);
+                }
+            }
+            if (!cancelled) await fetchNotes();
+        })();
+
+        return () => { cancelled = true; };
+    }, [user, authLoading, adapter, fetchNotes]);
+
+    const loadTrash = useCallback((force = false) => {
+        if (trashLoadedRef.current && !force) return;
+        trashLoadedRef.current = true;
         adapter.getTrash()
             .then(setTrash)
             .catch((e) => console.error("Failed to fetch trash:", e));
     }, [adapter]);
-
-    useEffect(() => {
-        if (!user) return;
-        fetchNotes();
-    }, [user, fetchNotes]);
 
     const deleteNote = useCallback(async (id: string) => {
         const note = notes.find((n) => n.id === id) ?? localEditsRef.current.get(id);
@@ -96,7 +117,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         const timer = setTimeout(async () => {
             pendingDeleteRef.current.delete(id);
             await adapter.deleteNote(id);
-            adapter.getTrash().then(setTrash).catch(() => {});
+            loadTrash(true);
         }, UNDO_DELAY_MS);
         pendingDeleteRef.current.set(id, { note, timer });
 
@@ -109,12 +130,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
                     clearTimeout(pending.timer);
                     pendingDeleteRef.current.delete(id);
                     localEditsRef.current.set(id, pending.note);
-                    setNotes((prev) => sortByUpdated([pending.note, ...prev]));
+                    setNotes((prev) => sortNotesByUpdated([pending.note, ...prev]));
                 },
             },
             duration: UNDO_DELAY_MS,
         });
-    }, [notes, adapter]);
+    }, [notes, adapter, loadTrash]);
 
     // Cmd+Z / Ctrl+Z to undo last delete
     useEffect(() => {
@@ -133,7 +154,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
                 clearTimeout(pending.timer);
                 pendingDeleteRef.current.delete(lastId);
                 localEditsRef.current.set(lastId, pending.note);
-                setNotes((prev) => sortByUpdated([pending.note, ...prev]));
+                setNotes((prev) => sortNotesByUpdated([pending.note, ...prev]));
                 toast.dismiss();
                 toast("Note restored");
             }
@@ -155,7 +176,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const restoreNote = useCallback(async (id: string) => {
         const restored = await adapter.restoreNote(id);
         if (restored) {
-            setNotes((prev) => sortByUpdated([restored, ...prev]));
+            setNotes((prev) => sortNotesByUpdated([restored, ...prev]));
         }
         setTrash((prev) => prev.filter((n) => n.id !== id));
     }, [adapter]);
@@ -227,7 +248,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     return (
         <NotesContext.Provider value={{
             notes, trash, loading, createNote, deleteNote, restoreNote, permanentlyDeleteNote, emptyTrash,
-            updateNote, patchNote, saveNote, moveNoteToFolder, setNoteSyncMode, revalidate: fetchNotes,
+            updateNote, patchNote, saveNote, moveNoteToFolder, setNoteSyncMode, loadTrash, revalidate: fetchNotes,
         }}>
             {children}
         </NotesContext.Provider>

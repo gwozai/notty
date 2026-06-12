@@ -7,6 +7,21 @@ import { drizzle } from "drizzle-orm/durable-sqlite";
 import { importPKCS8, SignJWT } from "jose";
 import * as schema from "./auth-schema";
 
+/**
+ * Normalize an Apple private key from env into PKCS#8 PEM.
+ * Handles the two common `.env` storage mistakes:
+ *  - literal `\n` escapes instead of real newlines
+ *  - the base64 body stored without the PEM header/footer
+ * If the value already looks like PEM it's returned unchanged.
+ */
+function normalizeApplePrivateKey(raw: string): string {
+    let key = raw.trim().replace(/\\n/g, "\n");
+    if (key.includes("BEGIN")) return key;
+    // Bare base64 body — wrap it as PKCS#8 PEM with 64-char lines.
+    const body = key.replace(/\s+/g, "").match(/.{1,64}/g)?.join("\n") ?? key;
+    return `-----BEGIN PRIVATE KEY-----\n${body}\n-----END PRIVATE KEY-----`;
+}
+
 export class AuthDurableObject extends DurableObject {
     private db: ReturnType<typeof drizzle>;
     private authInstance: Awaited<ReturnType<typeof betterAuth>> | null = null;
@@ -126,21 +141,28 @@ export class AuthDurableObject extends DurableObject {
             };
         }
         if (this.v("APPLE_CLIENT_ID") && this.v("APPLE_PRIVATE_KEY") && this.v("APPLE_TEAM_ID") && this.v("APPLE_KEY_ID")) {
-            const key = await importPKCS8(this.v("APPLE_PRIVATE_KEY")!, "ES256");
-            const now = Math.floor(Date.now() / 1000);
-            const clientSecret = await new SignJWT({})
-                .setProtectedHeader({ alg: "ES256", kid: this.v("APPLE_KEY_ID")! })
-                .setIssuer(this.v("APPLE_TEAM_ID")!)
-                .setSubject(this.v("APPLE_CLIENT_ID")!)
-                .setAudience("https://appleid.apple.com")
-                .setIssuedAt(now)
-                .setExpirationTime(now + 180 * 24 * 60 * 60)
-                .sign(key);
-            socialProviders.apple = {
-                clientId: this.v("APPLE_CLIENT_ID"),
-                clientSecret,
-                appBundleIdentifier: this.v("APPLE_APP_BUNDLE_IDENTIFIER"),
-            };
+            try {
+                const key = await importPKCS8(normalizeApplePrivateKey(this.v("APPLE_PRIVATE_KEY")!), "ES256");
+                const now = Math.floor(Date.now() / 1000);
+                const clientSecret = await new SignJWT({})
+                    .setProtectedHeader({ alg: "ES256", kid: this.v("APPLE_KEY_ID")! })
+                    .setIssuer(this.v("APPLE_TEAM_ID")!)
+                    .setSubject(this.v("APPLE_CLIENT_ID")!)
+                    .setAudience("https://appleid.apple.com")
+                    .setIssuedAt(now)
+                    .setExpirationTime(now + 180 * 24 * 60 * 60)
+                    .sign(key);
+                socialProviders.apple = {
+                    clientId: this.v("APPLE_CLIENT_ID"),
+                    clientSecret,
+                    appBundleIdentifier: this.v("APPLE_APP_BUNDLE_IDENTIFIER"),
+                };
+            } catch (e) {
+                // A malformed APPLE_PRIVATE_KEY must not take down the entire auth
+                // system (it would 500 every request, including anonymous sign-in).
+                // Disable Apple sign-in and keep the rest of auth working.
+                console.error("[auth] Apple sign-in disabled — invalid APPLE_PRIVATE_KEY:", e);
+            }
         }
 
         const baseURL = this.v("BETTER_AUTH_URL") || "http://localhost:8787";
@@ -150,7 +172,13 @@ export class AuthDurableObject extends DurableObject {
             socialProviders,
             secret: this.v("BETTER_AUTH_SECRET") || "notty-dev-secret-that-is-long-enough-for-validation",
             baseURL,
-            trustedOrigins: [baseURL, "https://appleid.apple.com", "https://notty.dhr.wtf", "https://notty.page", "http://localhost:8787"],
+            trustedOrigins: [
+                baseURL,
+                "https://appleid.apple.com",
+                "https://notty.dhr.wtf", "http://notty.dhr.wtf",
+                "https://notty.page", "http://notty.page",
+                "http://localhost:8787",
+            ],
         });
         return this.authInstance;
     }

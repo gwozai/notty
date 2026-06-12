@@ -85,6 +85,25 @@ export class WebAdapter implements NottyAdapter {
         await authClient.signOut();
     }
 
+    async getCachedNotesList(): Promise<Note[]> {
+        const cached = await getCachedNotes();
+        return cached.map((n) => ({ ...n, content: "" }));
+    }
+
+    async getNotesList(): Promise<Note[]> {
+        try {
+            const res = await fetch("/api/notes/list");
+            await assertOk(res, "Failed to fetch notes list");
+            const list: Note[] = ((await res.json()) as Note[]).map((n) => ({ ...n, content: "" }));
+            const existing = await getCachedNotes();
+            const contentById = new Map(existing.map((n) => [n.id, n.content]));
+            setCachedNotes(list.map((n) => ({ ...n, content: contentById.get(n.id) ?? "" })));
+            return list;
+        } catch {
+            return this.getCachedNotesList();
+        }
+    }
+
     async getNotes(): Promise<Note[]> {
         try {
             const res = await fetch("/api/notes");
@@ -159,6 +178,10 @@ export class WebAdapter implements NottyAdapter {
     async permanentlyDeleteNote(id: string): Promise<void> {
         const res = await fetch(`/api/notes/${id}/permanent`, { method: "DELETE" });
         await assertOk(res, "Failed to permanently delete note");
+    }
+
+    async getCachedFolders(): Promise<Folder[]> {
+        return getCachedFolders();
     }
 
     async getFolders(): Promise<Folder[]> {

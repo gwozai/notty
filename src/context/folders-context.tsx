@@ -18,7 +18,7 @@ type FoldersContextType = {
 const FoldersContext = createContext<FoldersContextType | null>(null);
 
 export function FoldersProvider({ children }: { children: ReactNode }) {
-    const { user } = useAuth();
+    const { user, loading: authLoading } = useAuth();
     const adapter = useAdapter();
     const [folders, setFolders] = useState<Folder[]>([]);
     const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
@@ -31,9 +31,25 @@ export function FoldersProvider({ children }: { children: ReactNode }) {
     }, [adapter]);
 
     useEffect(() => {
-        if (!user) return;
-        fetchFolders();
-    }, [user, fetchFolders]);
+        if (!user) {
+            if (!authLoading) setLoading(false);
+            return;
+        }
+
+        let cancelled = false;
+        (async () => {
+            if (adapter.getCachedFolders) {
+                const cached = await adapter.getCachedFolders();
+                if (!cancelled && cached.length > 0) {
+                    setFolders(cached);
+                    setLoading(false);
+                }
+            }
+            if (!cancelled) await fetchFolders();
+        })();
+
+        return () => { cancelled = true; };
+    }, [user, authLoading, fetchFolders, adapter]);
 
     const createFolder = useCallback(async (name: string, color: string) => {
         const folder: Folder = {

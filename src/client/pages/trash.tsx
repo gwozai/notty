@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useNotes } from "@/context/notes-context";
 import { AppLayout } from "@/components/app-layout";
 import { getNoteColor, extractPreview } from "@/components/note-card";
@@ -10,8 +11,10 @@ function formatDate(ts: number): string {
 }
 
 export function TrashPage() {
-    const { trash, restoreNote, permanentlyDeleteNote, emptyTrash } = useNotes();
+    const { trash, restoreNote, permanentlyDeleteNote, emptyTrash, loadTrash } = useNotes();
     const isDark = useIsDark();
+
+    useEffect(() => { loadTrash(); }, [loadTrash]);
 
     return (
         <AppLayout>

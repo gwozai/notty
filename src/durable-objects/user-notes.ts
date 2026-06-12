@@ -4,6 +4,7 @@ import * as syncProtocol from "y-protocols/sync";
 import * as encoding from "lib0/encoding";
 import * as decoding from "lib0/decoding";
 import { createPatch, applyPatch } from "../lib/diff";
+import { deriveTitleAndPreview, isEmptyDoc } from "../lib/note-preview";
 
 const MSG_SYNC = 0;
 const MSG_AWARENESS = 1;
@@ -205,9 +206,7 @@ export class UserNotesDurableObject extends DurableObject {
                     // Also sync content + title columns so HTTP reads stay fresh
                     const content = this.extractContentJson(noteId);
                     if (content) {
-                        const parsed = JSON.parse(content);
-                        const firstNode = parsed?.content?.[0];
-                        const title = firstNode?.content?.map((n: any) => n.text || "").join("").trim() || "Untitled";
+                        const title = deriveTitleAndPreview(content).title || "Untitled";
                         this.sql.exec(
                             "UPDATE notes SET yjs_state = ?, content = ?, title = ?, yjs_initialized_at = COALESCE(yjs_initialized_at, unixepoch()), pending_index = 1, updated_at = unixepoch() WHERE id = ?",
                             state, content, title, noteId
@@ -267,6 +266,16 @@ export class UserNotesDurableObject extends DurableObject {
         const parentId = branch.head_version_id;
 
         const id = crypto.randomUUID();
+
+        // Defense-in-depth: never record an accidental wipe as a version. A
+        // transient empty doc (load race, reconnect, stale beacon) snapshotted
+        // over real content is what corrupts history into "deleted everything"
+        // diffs. If the new content is blank but the previous version had text,
+        // skip — the client-side guard should already prevent this, but old
+        // clients and the unmount beacon can still slip an empty doc through.
+        if (parentId && isEmptyDoc(content) && !isEmptyDoc(this.reconstructVersion(parentId, noteId))) {
+            return null;
+        }
 
         // Count versions on this branch since last checkpoint
         let sinceCheckpoint = 0;
@@ -461,6 +470,9 @@ export class UserNotesDurableObject extends DurableObject {
         // Note routes
         if (request.method === "GET" && path === "/notes") {
             return Response.json(this.getAllNotes());
+        }
+        if (request.method === "GET" && path === "/notes/list") {
+            return Response.json(this.getNotesList());
         }
         if (request.method === "GET" && path === "/notes/trash") {
             return Response.json(this.getTrashNotes());
@@ -975,6 +987,20 @@ export class UserNotesDurableObject extends DurableObject {
         return this.sql
             .exec("SELECT id, title, content, folder_id, sync_mode, locked, published, published_at, created_at, updated_at FROM notes WHERE deleted_at IS NULL ORDER BY updated_at DESC")
             .toArray();
+    }
+
+    private getNotesList() {
+        // Reads `content` (cheap local SQLite read) to derive an authoritative
+        // name + preview, but never ships the full JSON — keeps the payload tiny
+        // while guaranteeing the list always has a real title and snippet.
+        return this.sql
+            .exec("SELECT id, title, content, folder_id, sync_mode, locked, published, published_at, created_at, updated_at FROM notes WHERE deleted_at IS NULL ORDER BY updated_at DESC")
+            .toArray()
+            .map((row: any) => {
+                const { content, ...meta } = row;
+                const { title, preview } = deriveTitleAndPreview(content as string);
+                return { ...meta, title: title || meta.title || "Untitled", preview };
+            });
     }
 
     private getTrashNotes() {

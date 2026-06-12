@@ -4,7 +4,7 @@ import { useFolders } from "@/context/folders-context";
 import { useNotes } from "@/context/notes-context";
 import { useAdapter } from "@/context/adapter-context";
 import { useAuth } from "@/context/auth-context";
-import { useSmfs } from "@/context/smfs-context";
+import { NoteFileList } from "./note-file-list";
 import { DarkModeToggle } from "./dark-mode-toggle";
 import { AuthSection } from "./auth-section";
 import { isTauri } from "@/lib/platform";
@@ -16,53 +16,12 @@ const FOLDER_COLORS = [
     "#8B5CF6", "#EC4899", "#F97316", "#06B6D4",
 ];
 
-function SmfsSection() {
-    const smfs = useSmfs();
-
-    return (
-        <div className="mt-2">
-            <button
-                onClick={smfs.togglePanel}
-                className="flex items-center justify-between w-full px-3 py-[7px] text-[13px] rounded-xl transition-colors"
-                style={{
-                    color: "var(--color-ink-muted)",
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--color-sidebar-active)")}
-                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-            >
-                <div className="flex items-center gap-2">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-                    </svg>
-                    <span>Supermemory FS</span>
-                </div>
-                <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    style={{
-                        transform: smfs.isOpen ? "rotate(180deg)" : "rotate(0deg)",
-                        transition: "transform 0.2s",
-                    }}
-                >
-                    <polyline points="6 9 12 15 18 9" />
-                </svg>
-            </button>
-        </div>
-    );
-}
-
 export function Sidebar() {
     const navigate = useNavigate();
     const tabNavigate = useTabNavigate();
     const location = useLocation();
     const { folders, selectedFolderId, selectFolder, createFolder, deleteFolder, renameFolder, updateFolderColor } = useFolders();
-    const { notes, trash } = useNotes();
+    const { notes, trash, loadTrash } = useNotes();
     const adapter = useAdapter();
     const { user } = useAuth();
     const [sharedNotes, setSharedNotes] = useState<SharedNote[]>([]);
@@ -73,9 +32,14 @@ export function Sidebar() {
     const editRef = useRef<HTMLInputElement>(null);
     const createRef = useRef<HTMLInputElement>(null);
 
+    const recentNotes = notes.slice(0, 3);
+
     useEffect(() => {
         if (!user) return;
-        adapter.getSharedWithMe().then(setSharedNotes).catch(() => {});
+        const id = window.setTimeout(() => {
+            adapter.getSharedWithMe().then(setSharedNotes).catch(() => {});
+        }, 1500);
+        return () => window.clearTimeout(id);
     }, [user, adapter]);
 
     useEffect(() => {
@@ -145,6 +109,29 @@ export function Sidebar() {
                     <span className="text-[11px] tabular-nums text-[var(--color-ink-muted)]">{notes.length}</span>
                 </button>
             </nav>
+
+            {recentNotes.length > 0 && (
+                <div className="mt-4 px-3">
+                    <div className="flex items-center justify-between px-3 mb-2">
+                        <span className="text-[11px] font-medium uppercase tracking-widest text-[var(--color-ink-muted)]">
+                            Recent
+                        </span>
+                    </div>
+                    <NoteFileList
+                        notes={recentNotes}
+                        compact
+                        onOpen={(note) => tabNavigate(`/note/${note.id}`, { title: note.title || "Untitled" })}
+                    />
+                    {notes.length > 3 && (
+                        <button
+                            onClick={() => { selectFolder(null); navigate("/"); }}
+                            className="w-full mt-1 px-3 py-[7px] text-[12px] text-[var(--color-ink-muted)] hover:text-[var(--color-ink)] hover:bg-[var(--color-sidebar-active)]/60 rounded-xl transition-colors text-left"
+                        >
+                            More…
+                        </button>
+                    )}
+                </div>
+            )}
 
             {/* Folders */}
             <div className="mt-6 flex-1 overflow-y-auto scrollbar-hide px-3">
@@ -284,13 +271,6 @@ export function Sidebar() {
                 </div>
             )}
 
-            {/* SMFS Section - only for authenticated non-anonymous users */}
-            {user && !user.isAnonymous && (
-                <div className="px-3">
-                    <SmfsSection />
-                </div>
-            )}
-
             {/* Auth + Bottom */}
             <AuthSection />
             {user && !user.isAnonymous && (
@@ -318,9 +298,8 @@ export function Sidebar() {
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1">
                         <DarkModeToggle />
-                        {trash.length > 0 && (
-                            <button
-                                onClick={() => { selectFolder(null); navigate("/trash"); }}
+                        <button
+                                onClick={() => { loadTrash(); selectFolder(null); navigate("/trash"); }}
                                 className={`relative p-1.5 rounded-lg transition-colors ${
                                     location.pathname === "/trash"
                                         ? "text-[var(--color-ink)] bg-[var(--color-sidebar-active)]"
@@ -331,11 +310,12 @@ export function Sidebar() {
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                     <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                                 </svg>
-                                <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] flex items-center justify-center rounded-full bg-[var(--color-ink-muted)] text-[var(--color-bg,#fff)] text-[9px] font-medium leading-none">
-                                    {trash.length}
-                                </span>
+                                {trash.length > 0 && (
+                                    <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] flex items-center justify-center rounded-full bg-[var(--color-ink-muted)] text-[var(--color-bg,#fff)] text-[9px] font-medium leading-none">
+                                        {trash.length}
+                                    </span>
+                                )}
                             </button>
-                        )}
                     </div>
                     <span className="text-[10px] text-[var(--color-ink-muted)]/60 font-serif italic">notty v2</span>
                 </div>

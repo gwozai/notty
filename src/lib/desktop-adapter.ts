@@ -119,6 +119,15 @@ export class DesktopAdapter implements NottyAdapter {
         try { await getCloudAuth().signOut(); } catch {}
     }
 
+    async getCachedNotesList(): Promise<Note[]> {
+        const local: Note[] = await invoke("get_notes");
+        return local.map((n) => ({ ...n, content: "" }));
+    }
+
+    async getNotesList(): Promise<Note[]> {
+        return this.getCachedNotesList();
+    }
+
     async getNotes(): Promise<Note[]> {
         const local: Note[] = await invoke("get_notes");
 

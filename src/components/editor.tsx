@@ -13,6 +13,7 @@ import {
     handleCommandNavigation,
 } from "novel";
 import { useDebouncedCallback } from "use-debounce";
+import { deriveTitle } from "@/lib/note-preview";
 import {
     BoldIcon,
     ItalicIcon,
@@ -64,10 +65,7 @@ const CURSOR_COLORS = [
 ];
 
 function extractTitle(json: JSONContent): string {
-    const first = json.content?.[0];
-    if (!first) return "Untitled";
-    const text = first.content?.map((n: any) => n.text || "").join("") || "";
-    return text.trim() || "Untitled";
+    return deriveTitle(json);
 }
 
 type FontChoice = "sans" | "serif" | "mono";
@@ -93,6 +91,11 @@ export function Editor({ noteId, shareToken, readOnly = false, folderId, saveGua
     const [ready, setReady] = useState(false);
     const editorRef = useRef<EditorInstance | null>(null);
     const lastSavedRef = useRef<string>("");
+    // True once we've finished loading the note's content (IndexedDB + server).
+    // Until then, an empty editor means "not loaded yet", NOT "user cleared it" —
+    // so we must never persist an empty doc and wipe real content during the
+    // load race. This is what corrupts version history with "deleted everything".
+    const contentLoadedRef = useRef(false);
     // Stable ref for folderId — prevents stale closures during unmount/view-transitions
     const folderIdRef = useRef(folderId);
     folderIdRef.current = folderId;
@@ -201,7 +204,9 @@ export function Editor({ noteId, shareToken, readOnly = false, folderId, saveGua
         const json = editor.getJSON();
         const text = editor.getText().trim();
         const content = JSON.stringify(json);
-        if (!text && !lastSavedRef.current) return Promise.resolve();
+        // Never write an empty doc before content has loaded — that's a load-race
+        // wipe, not a real edit, and it corrupts the note + its version history.
+        if (!text && !contentLoadedRef.current) return Promise.resolve();
         if (content === lastSavedRef.current) return Promise.resolve();
         const title = extractTitle(json);
 
@@ -299,67 +304,80 @@ export function Editor({ noteId, shareToken, readOnly = false, folderId, saveGua
     const isTauri = "__TAURI_INTERNALS__" in window;
     useEffect(() => {
         let cancelled = false;
+        contentLoadedRef.current = false; // re-arm the empty-write guard per note
 
-        // Shared notes get content from WebSocket sync — skip HTTP bootstrap
+        const hasContent = () => ydoc.getXmlFragment("default").length > 1;
+        const parseDoc = (raw: any): JSONContent | null => {
+            if (!raw) return null;
+            try {
+                const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+                return parsed?.type === "doc" && parsed.content?.length ? parsed : null;
+            } catch (e) {
+                console.warn("[notty] Failed to parse bootstrap content:", e);
+                return null;
+            }
+        };
+        // Apply a server/local snapshot into the (already-mounted) editor, but
+        // only while the doc is still empty — so we never double content that
+        // arrived over Yjs. If the editor hasn't mounted yet, stash it and let
+        // onCreate apply it. This is the "retroactive load": render first, fill
+        // content in when it shows up.
+        const seed = (parsed: JSONContent | null) => {
+            if (cancelled || !parsed || hasContent()) return;
+            const ed = editorRef.current;
+            if (ed) {
+                if (!ed.getText().trim()) ed.commands.setContent(parsed);
+            } else {
+                bootstrapRef.current = parsed;
+            }
+        };
+
+        // Shared notes get content from WebSocket sync only — nothing to seed.
         if (shareToken) {
-            const p = provider.persistence ? provider.persistence.whenSynced : Promise.resolve();
-            p.then(() => { if (!cancelled) setReady(true); });
+            setReady(true);
+            contentLoadedRef.current = true;
             return () => { cancelled = true; };
         }
 
         if (isTauri) {
-            // Desktop is local-first: SQLite is the single seed path for the
-            // editor. Cloud sync mirrors snapshots in the adapter, but it must
-            // not merge a second Yjs document into this local editor session.
+            // Desktop is local-first: SQLite is the single seed path. Render
+            // immediately, then seed the snapshot once it's read.
+            setReady(true);
             adapter.getNote(noteId).catch(() => null).then((data: any) => {
-                if (cancelled) return;
-                if (data?.content) {
-                    try {
-                        const parsed = typeof data.content === "string" ? JSON.parse(data.content) : data.content;
-                        if (parsed?.type === "doc" && parsed.content?.length) {
-                            bootstrapRef.current = parsed;
-                        }
-                    } catch {}
-                }
-                setReady(true);
+                seed(parseDoc(data?.content));
+                if (!cancelled) contentLoadedRef.current = true;
             });
             return () => { cancelled = true; };
         }
 
-        // Web: IndexedDB + HTTP in parallel
+        // Web: show the editor as soon as local IndexedDB settles (≤150ms) — no
+        // waiting on the network. Warm revisits paint with content already in the
+        // doc; new/cold notes paint an empty editor instantly.
         const persistenceReady = provider.persistence
             ? provider.persistence.whenSynced
             : Promise.resolve();
-        const waitForPersistence = compact
-            ? persistenceReady
-            : Promise.race([persistenceReady, new Promise((r) => setTimeout(r, 150))]);
-        const httpContent = Promise.race([
-            adapter.getNote(noteId).catch((e) => { console.warn("[notty] HTTP bootstrap fetch failed:", e); return null; }),
-            new Promise((r) => setTimeout(() => r(null), 1000)),
-        ]);
+        (compact ? persistenceReady : Promise.race([persistenceReady, new Promise((r) => setTimeout(r, 150))]))
+            .then(() => { if (!cancelled) setReady(true); });
 
-        // Wait for WebSocket sync too (with timeout) so we don't bootstrap
-        // content that's about to arrive via Yjs — that causes CRDT duplication
-        const wsSync = Promise.race([
-            provider.whenSynced,
-            new Promise((r) => setTimeout(r, 2000)),
-        ]);
-
-        Promise.all([waitForPersistence, httpContent, wsSync]).then(([, data]: [any, any, any]) => {
-            if (cancelled) return;
-            const hasYjsContent = ydoc.getXmlFragment("default").length > 1;
-            if (!hasYjsContent && data?.content) {
-                try {
-                    const parsed = typeof data.content === "string" ? JSON.parse(data.content) : data.content;
-                    if (parsed?.type === "doc" && parsed.content?.length) {
-                        bootstrapRef.current = parsed;
-                    }
-                } catch (e) {
-                    console.warn("[notty] Failed to parse bootstrap content:", e);
-                }
+        // Retroactively load the server snapshot in the background. Only seed if
+        // the doc is still empty after WS has had a chance (avoids CRDT doubling).
+        (async () => {
+            try {
+                const data: any = await Promise.race([
+                    adapter.getNote(noteId).catch((e) => { console.warn("[notty] HTTP bootstrap fetch failed:", e); return null; }),
+                    new Promise((r) => setTimeout(() => r(null), 1000)),
+                ]);
+                if (cancelled) return;
+                const parsed = parseDoc(data?.content);
+                if (!parsed || hasContent()) return;
+                await Promise.race([provider.whenSynced, new Promise((r) => setTimeout(r, 800))]);
+                seed(parsed);
+            } finally {
+                // Loading is done (content seeded, already present, or genuinely
+                // empty) → empty edits from here on are real user clears.
+                if (!cancelled) contentLoadedRef.current = true;
             }
-            setReady(true);
-        });
+        })();
 
         return () => { cancelled = true; };
     }, [noteId, ydoc, provider, adapter]);

@@ -5,6 +5,8 @@ export type Note = {
     id: string;
     title: string;
     content: string;
+    /** Short snippet of body text for list rows; populated by the list endpoint. */
+    preview?: string;
     folder_id?: string | null;
     sync_mode?: "cloud" | "local";
     locked?: boolean | number;
@@ -125,6 +127,8 @@ export interface NottyAdapter {
 
     // Notes
     getNotes(): Promise<Note[]>;
+    getNotesList(): Promise<Note[]>;
+    getCachedNotesList?(): Promise<Note[]>;
     getNote(id: string, shareToken?: string): Promise<Note | null>;
     getNoteMeta(id: string, shareToken?: string): Promise<Partial<Note> | null>;
     saveNote(id: string, title: string, content: string, folderId?: string | null): Promise<SaveResult>;
@@ -136,6 +140,7 @@ export interface NottyAdapter {
 
     // Folders
     getFolders(): Promise<Folder[]>;
+    getCachedFolders?(): Promise<Folder[]>;
     saveFolder(folder: Partial<Folder> & { id: string; name: string }): Promise<void>;
     deleteFolder(id: string): Promise<void>;
     moveNoteToFolder(noteId: string, folderId: string | null): Promise<void>;
