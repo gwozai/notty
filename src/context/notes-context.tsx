@@ -93,6 +93,34 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         return () => { cancelled = true; };
     }, [user, authLoading, adapter, fetchNotes]);
 
+    // Live sync: subscribe to server-pushed note changes so the list stays fresh
+    // across devices/tabs (and for notes that persist via the Yjs path) without a
+    // manual refresh. note-updated is coalesced into a debounced revalidate so the
+    // list gets the server's canonical title/preview; note-deleted removes
+    // optimistically. Media events are re-dispatched for media-context to consume.
+    useEffect(() => {
+        if (!user || !adapter.subscribeToNoteEvents) return;
+        let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+        const scheduleRevalidate = () => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => { void fetchNotes(); }, 300);
+        };
+        const unsub = adapter.subscribeToNoteEvents((evt) => {
+            if (evt.type === "note-deleted") {
+                // Don't fight a local undo-delete window still in flight.
+                if (!pendingDeleteRef.current.has(evt.id)) {
+                    setNotes((prev) => prev.filter((n) => n.id !== evt.id));
+                }
+                localEditsRef.current.delete(evt.id);
+            } else if (evt.type === "note-updated") {
+                scheduleRevalidate();
+            } else if (evt.type === "media-added" || evt.type === "media-deleted") {
+                try { window.dispatchEvent(new CustomEvent("notty:media-event", { detail: evt })); } catch {}
+            }
+        });
+        return () => { clearTimeout(debounceTimer); unsub(); };
+    }, [user, adapter, fetchNotes]);
+
     const loadTrash = useCallback((force = false) => {
         if (trashLoadedRef.current && !force) return;
         trashLoadedRef.current = true;

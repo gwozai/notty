@@ -190,4 +190,19 @@ export interface NottyAdapter {
 
     // Realtime
     createProvider(noteId: string, doc: Y.Doc, opts?: { shareToken?: string; onContentReset?: () => void }): NottyProvider;
+    /**
+     * Subscribe to server-pushed note/media changes for the signed-in user so
+     * lists stay live across devices without a manual refresh. Opens a single
+     * lightweight WebSocket that receives the DO's `broadcastJson` control
+     * messages (it does NOT run the CRDT/collab protocol). Returns an
+     * unsubscribe function. Optional — surfaces without a realtime channel
+     * simply omit it and fall back to revalidate-on-navigation.
+     */
+    subscribeToNoteEvents?(handler: (evt: NoteEvent) => void): () => void;
 }
+
+export type NoteEvent =
+    | { type: "note-updated"; note: Note }
+    | { type: "note-deleted"; id: string }
+    | { type: "media-added"; media: MediaItem }
+    | { type: "media-deleted"; id: string };

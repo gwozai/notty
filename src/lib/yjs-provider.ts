@@ -131,6 +131,12 @@ export class NottyProvider {
         };
 
         ws.onmessage = (event) => {
+            // The DO's broadcastJson (note-updated / note-deleted / media-*) sends
+            // JSON *string* frames to every owner socket, including this editor
+            // one. They're not part of the binary CRDT protocol — feeding them to
+            // the yjs decoder throws "Unexpected end of array". The notes list
+            // handles those via subscribeToNoteEvents; here we just ignore them.
+            if (typeof event.data === "string") return;
             const data = new Uint8Array(event.data);
             const decoder = decoding.createDecoder(data);
             const msgType = decoding.readVarUint(decoder);

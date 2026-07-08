@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useRef, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useRef, useEffect, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useAdapter } from "./adapter-context";
 import { useAuth } from "./auth-context";
@@ -42,6 +42,22 @@ export function MediaProvider({ children }: { children: ReactNode }) {
         loadedRef.current = true;
         fetchMedia();
     }, [user, fetchMedia]);
+
+    // Live sync: media-added/deleted events are surfaced by notes-context's
+    // realtime subscription as a window event (one shared socket for both).
+    useEffect(() => {
+        if (!user) return;
+        const handler = (e: Event) => {
+            const evt = (e as CustomEvent).detail;
+            if (evt?.type === "media-added" && evt.media) {
+                setMedia((prev) => prev.some((m) => m.id === evt.media.id) ? prev : [evt.media, ...prev]);
+            } else if (evt?.type === "media-deleted") {
+                setMedia((prev) => prev.filter((m) => m.id !== evt.id));
+            }
+        };
+        window.addEventListener("notty:media-event", handler);
+        return () => window.removeEventListener("notty:media-event", handler);
+    }, [user]);
 
     const uploadMedia = useCallback(async (file: File, dimensions?: { width: number; height: number }) => {
         const item = await adapter.uploadMedia(file, dimensions);

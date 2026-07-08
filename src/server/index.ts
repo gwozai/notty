@@ -115,8 +115,12 @@ async function getSession(env: Env, request: Request) {
     if (existingCookie) {
         headers.set("Cookie", existingCookie);
     } else if (headerToken || queryToken) {
-        // Use __Secure- prefix since the DO request URL is https://
-        headers.set("Cookie", `__Secure-better-auth.session_token=${headerToken || queryToken}`);
+        // better-auth derives the cookie name from the request protocol —
+        // __Secure- prefixed on https, bare on http. Match url.protocol so
+        // token auth (desktop X-Session-Token, mobile ?token=) also works on
+        // http://localhost in dev, not just https in prod.
+        const prefix = url.protocol === "https:" ? "__Secure-" : "";
+        headers.set("Cookie", `${prefix}better-auth.session_token=${headerToken || queryToken}`);
     }
     const res = await stub.fetch(new Request(`${url.origin}/api/auth/get-session`, { headers }));
     if (!res.ok) return null;
