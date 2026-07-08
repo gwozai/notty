@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from "react";
 import { useAdapter } from "./adapter-context";
+import { isTauriMobile } from "@/lib/platform";
 
 type User = {
     id: string;
@@ -89,7 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return (
         <AuthContext.Provider value={{ user, loading, failed, signIn, signOut, retry }}>
-            {failed && <AuthErrorBanner onRetry={retry} />}
+            {failed && !isTauriMobile && <AuthErrorBanner onRetry={retry} />}
             {children}
         </AuthContext.Provider>
     );

@@ -1,5 +1,5 @@
 import type * as Y from "yjs";
-import type { NottyAdapter, Note, NoteVersion, NoteBranch, NoteTree, User, Folder, Share, SharedNote, Profile, MediaItem, SaveResult, SessionHandle } from "./adapter";
+import type { NottyAdapter, Note, NoteVersion, NoteBranch, NoteTree, User, Folder, Share, SharedNote, Profile, MediaItem, SaveResult, SessionHandle, NoteEvent } from "./adapter";
 import { NottyProvider } from "./yjs-provider";
 import { authClient } from "./auth-client";
 
@@ -75,6 +75,36 @@ function idbPut(db: IDBDatabase, key: string, value: any): Promise<void> {
 }
 
 export class WebAdapter implements NottyAdapter {
+    /**
+     * Base origin for all API calls. Empty string on web means same-origin
+     * (cookies flow automatically). Subclasses (e.g. the Tauri mobile adapter,
+     * whose webview runs on tauri://localhost) point this at the cloud origin.
+     */
+    protected apiBase = "";
+
+    /**
+     * Extra headers merged into every API request. Web sends none — the session
+     * rides on the same-origin cookie. Token-based clients override this to add
+     * `X-Session-Token`.
+     */
+    protected async authHeaders(): Promise<Record<string, string>> {
+        return {};
+    }
+
+    /**
+     * Single choke point for every REST call so subclasses can re-target the
+     * origin and inject auth. Behaviour on web is identical to a bare `fetch`.
+     */
+    protected async request(path: string, init?: RequestInit): Promise<Response> {
+        const extra = await this.authHeaders();
+        if (Object.keys(extra).length === 0) {
+            return fetch(this.apiBase + path, init);
+        }
+        const headers = new Headers(init?.headers);
+        for (const [k, v] of Object.entries(extra)) headers.set(k, v);
+        return fetch(this.apiBase + path, { ...init, headers });
+    }
+
     async getSession(): Promise<User | null> {
         try {
             const session = await authClient.getSession();
@@ -101,7 +131,7 @@ export class WebAdapter implements NottyAdapter {
 
     async getNotesList(): Promise<Note[]> {
         try {
-            const res = await fetch("/api/notes/list");
+            const res = await this.request("/api/notes/list");
             await assertOk(res, "Failed to fetch notes list");
             const list: Note[] = ((await res.json()) as Note[]).map((n) => ({ ...n, content: "" }));
             const existing = await getCachedNotes();
@@ -115,7 +145,7 @@ export class WebAdapter implements NottyAdapter {
 
     async getNotes(): Promise<Note[]> {
         try {
-            const res = await fetch("/api/notes");
+            const res = await this.request("/api/notes");
             await assertOk(res, "Failed to fetch notes");
             const notes: Note[] = await res.json();
             setCachedNotes(notes);
@@ -129,7 +159,7 @@ export class WebAdapter implements NottyAdapter {
     async getNote(id: string, shareToken?: string): Promise<Note | null> {
         try {
             const params = shareToken ? `?share=${encodeURIComponent(shareToken)}` : "";
-            const res = await fetch(`/api/notes/${id}${params}`);
+            const res = await this.request(`/api/notes/${id}${params}`);
             if (res.status === 404) return null;
             await assertOk(res, "Failed to fetch note");
             return res.json();
@@ -142,7 +172,7 @@ export class WebAdapter implements NottyAdapter {
     async getNoteMeta(id: string, shareToken?: string): Promise<Partial<Note> | null> {
         try {
             const params = shareToken ? `?share=${encodeURIComponent(shareToken)}` : "";
-            const res = await fetch(`/api/notes/${id}/meta${params}`);
+            const res = await this.request(`/api/notes/${id}/meta${params}`);
             if (res.status === 404) return null;
             if (!res.ok) return null;
             return res.json();
@@ -154,7 +184,7 @@ export class WebAdapter implements NottyAdapter {
     async saveNote(id: string, title: string, content: string, folderId?: string | null): Promise<SaveResult> {
         const body: Record<string, any> = { id, title, content };
         if (folderId !== undefined) body.folder_id = folderId;
-        const res = await fetch("/api/notes", {
+        const res = await this.request("/api/notes", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
@@ -168,24 +198,24 @@ export class WebAdapter implements NottyAdapter {
     }
 
     async deleteNote(id: string): Promise<void> {
-        const res = await fetch(`/api/notes/${id}`, { method: "DELETE" });
+        const res = await this.request(`/api/notes/${id}`, { method: "DELETE" });
         await assertOk(res, "Failed to delete note");
     }
 
     async getTrash(): Promise<Note[]> {
-        const res = await fetch("/api/notes-trash");
+        const res = await this.request("/api/notes-trash");
         await assertOk(res, "Failed to fetch trash");
         return res.json();
     }
 
     async restoreNote(id: string): Promise<Note | null> {
-        const res = await fetch(`/api/notes/${id}/restore`, { method: "POST" });
+        const res = await this.request(`/api/notes/${id}/restore`, { method: "POST" });
         await assertOk(res, "Failed to restore note");
         return res.json();
     }
 
     async permanentlyDeleteNote(id: string): Promise<void> {
-        const res = await fetch(`/api/notes/${id}/permanent`, { method: "DELETE" });
+        const res = await this.request(`/api/notes/${id}/permanent`, { method: "DELETE" });
         await assertOk(res, "Failed to permanently delete note");
     }
 
@@ -195,7 +225,7 @@ export class WebAdapter implements NottyAdapter {
 
     async getFolders(): Promise<Folder[]> {
         try {
-            const res = await fetch("/api/folders");
+            const res = await this.request("/api/folders");
             await assertOk(res, "Failed to fetch folders");
             const folders: Folder[] = await res.json();
             setCachedFolders(folders);
@@ -206,7 +236,7 @@ export class WebAdapter implements NottyAdapter {
     }
 
     async saveFolder(folder: Partial<Folder> & { id: string; name: string }): Promise<void> {
-        const res = await fetch("/api/folders", {
+        const res = await this.request("/api/folders", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(folder),
@@ -215,12 +245,12 @@ export class WebAdapter implements NottyAdapter {
     }
 
     async deleteFolder(id: string): Promise<void> {
-        const res = await fetch(`/api/folders/${id}`, { method: "DELETE" });
+        const res = await this.request(`/api/folders/${id}`, { method: "DELETE" });
         await assertOk(res, "Failed to delete folder");
     }
 
     async moveNoteToFolder(noteId: string, folderId: string | null): Promise<void> {
-        const res = await fetch(`/api/notes/${noteId}/folder`, {
+        const res = await this.request(`/api/notes/${noteId}/folder`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ folder_id: folderId }),
@@ -229,7 +259,7 @@ export class WebAdapter implements NottyAdapter {
     }
 
     async setNoteSyncMode(noteId: string, mode: "cloud" | "local"): Promise<void> {
-        const res = await fetch(`/api/notes/${noteId}/sync-mode`, {
+        const res = await this.request(`/api/notes/${noteId}/sync-mode`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ sync_mode: mode }),
@@ -239,7 +269,7 @@ export class WebAdapter implements NottyAdapter {
 
     // Sharing
     async createShare(noteId: string, opts: { email?: string; permission?: string }): Promise<{ id: string; shareToken: string }> {
-        const res = await fetch("/api/shares", {
+        const res = await this.request("/api/shares", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ noteId, ...opts }),
@@ -249,30 +279,30 @@ export class WebAdapter implements NottyAdapter {
     }
 
     async listShares(noteId: string): Promise<Share[]> {
-        const res = await fetch(`/api/shares?noteId=${encodeURIComponent(noteId)}`);
+        const res = await this.request(`/api/shares?noteId=${encodeURIComponent(noteId)}`);
         await assertOk(res, "Failed to list shares");
         return res.json();
     }
 
     async deleteShare(id: string): Promise<void> {
-        const res = await fetch(`/api/shares/${id}`, { method: "DELETE" });
+        const res = await this.request(`/api/shares/${id}`, { method: "DELETE" });
         await assertOk(res, "Failed to delete share");
     }
 
     async getSharedWithMe(): Promise<SharedNote[]> {
-        const res = await fetch("/api/shared-with-me");
+        const res = await this.request("/api/shared-with-me");
         if (!res.ok) return [];
         return res.json();
     }
 
     // Locking
     async lockNote(noteId: string): Promise<void> {
-        const res = await fetch(`/api/notes/${noteId}/lock`, { method: "POST" });
+        const res = await this.request(`/api/notes/${noteId}/lock`, { method: "POST" });
         await assertOk(res, "Failed to lock note");
     }
 
     async unlockNote(noteId: string, lockToken: string): Promise<void> {
-        const res = await fetch(`/api/notes/${noteId}/unlock`, {
+        const res = await this.request(`/api/notes/${noteId}/unlock`, {
             method: "POST",
             headers: { "X-Lock-Token": lockToken },
         });
@@ -284,7 +314,7 @@ export class WebAdapter implements NottyAdapter {
         await authClient.signIn.passkey();
 
         // Step 2: Exchange for lock token
-        const res = await fetch(`/api/notes/${noteId}/verify-lock/complete`, {
+        const res = await this.request(`/api/notes/${noteId}/verify-lock/complete`, {
             method: "POST",
         });
         await assertOk(res, "Failed to verify lock");
@@ -293,20 +323,20 @@ export class WebAdapter implements NottyAdapter {
 
     // History (git-style versioning — server reconstructs content from patches)
     async getNoteHistory(noteId: string): Promise<NoteVersion[]> {
-        const res = await fetch(`/api/notes/${noteId}/history`);
+        const res = await this.request(`/api/notes/${noteId}/history`);
         await assertOk(res, "Failed to fetch note history");
         return res.json();
     }
 
     async getVersion(noteId: string, versionId: string): Promise<NoteVersion | null> {
-        const res = await fetch(`/api/notes/${noteId}/history/${versionId}`);
+        const res = await this.request(`/api/notes/${noteId}/history/${versionId}`);
         if (res.status === 404) return null;
         await assertOk(res, "Failed to fetch version");
         return res.json();
     }
 
     async restoreVersion(noteId: string, versionId: string): Promise<Note | null> {
-        const res = await fetch(`/api/notes/${noteId}/history/restore`, {
+        const res = await this.request(`/api/notes/${noteId}/history/restore`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ version_id: versionId }),
@@ -316,13 +346,13 @@ export class WebAdapter implements NottyAdapter {
     }
 
     async beginEditSession(noteId: string): Promise<SessionHandle> {
-        const res = await fetch(`/api/notes/${noteId}/sessions`, { method: "POST" });
+        const res = await this.request(`/api/notes/${noteId}/sessions`, { method: "POST" });
         await assertOk(res, "Failed to begin edit session");
         return res.json();
     }
 
     async finalizeEditSession(noteId: string, sessionId: string, reason: string): Promise<{ versionId?: string }> {
-        const res = await fetch(`/api/notes/${noteId}/sessions/${sessionId}/finalize`, {
+        const res = await this.request(`/api/notes/${noteId}/sessions/${sessionId}/finalize`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ reason }),
@@ -332,19 +362,19 @@ export class WebAdapter implements NottyAdapter {
     }
 
     async scheduleMemorySync(noteId: string): Promise<void> {
-        const res = await fetch(`/api/notes/${noteId}/memory-sync`, { method: "POST" });
+        const res = await this.request(`/api/notes/${noteId}/memory-sync`, { method: "POST" });
         await assertOk(res, "Failed to sync note to memory");
     }
 
     // Branches
     async getBranches(noteId: string): Promise<NoteBranch[]> {
-        const res = await fetch(`/api/notes/${noteId}/branches`);
+        const res = await this.request(`/api/notes/${noteId}/branches`);
         await assertOk(res, "Failed to fetch branches");
         return res.json();
     }
 
     async createBranch(noteId: string, name: string): Promise<NoteBranch> {
-        const res = await fetch(`/api/notes/${noteId}/branches`, {
+        const res = await this.request(`/api/notes/${noteId}/branches`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name }),
@@ -354,7 +384,7 @@ export class WebAdapter implements NottyAdapter {
     }
 
     async checkoutBranch(noteId: string, branchId: string): Promise<{ branch: string; content: string }> {
-        const res = await fetch(`/api/notes/${noteId}/branches/checkout`, {
+        const res = await this.request(`/api/notes/${noteId}/branches/checkout`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ branch_id: branchId }),
@@ -364,12 +394,12 @@ export class WebAdapter implements NottyAdapter {
     }
 
     async deleteBranch(noteId: string, branchId: string): Promise<void> {
-        const res = await fetch(`/api/notes/${noteId}/branches/${branchId}`, { method: "DELETE" });
+        const res = await this.request(`/api/notes/${noteId}/branches/${branchId}`, { method: "DELETE" });
         await assertOk(res, "Failed to delete branch");
     }
 
     async mergeBranch(noteId: string, sourceBranchId: string): Promise<{ ok: boolean; source_branch: string }> {
-        const res = await fetch(`/api/notes/${noteId}/branches/merge`, {
+        const res = await this.request(`/api/notes/${noteId}/branches/merge`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ source_branch_id: sourceBranchId }),
@@ -379,14 +409,14 @@ export class WebAdapter implements NottyAdapter {
     }
 
     async getNoteTree(noteId: string): Promise<NoteTree> {
-        const res = await fetch(`/api/notes/${noteId}/tree`);
+        const res = await this.request(`/api/notes/${noteId}/tree`);
         await assertOk(res, "Failed to fetch tree");
         return res.json();
     }
 
     // Media
     async getMedia(): Promise<MediaItem[]> {
-        const res = await fetch("/api/media");
+        const res = await this.request("/api/media");
         await assertOk(res, "Failed to fetch media");
         return res.json();
     }
@@ -398,18 +428,18 @@ export class WebAdapter implements NottyAdapter {
             form.append("width", String(dimensions.width));
             form.append("height", String(dimensions.height));
         }
-        const res = await fetch("/api/media", { method: "POST", body: form });
+        const res = await this.request("/api/media", { method: "POST", body: form });
         await assertOk(res, "Failed to upload media");
         return res.json();
     }
 
     async deleteMedia(id: string): Promise<void> {
-        const res = await fetch(`/api/media/${id}`, { method: "DELETE" });
+        const res = await this.request(`/api/media/${id}`, { method: "DELETE" });
         await assertOk(res, "Failed to delete media");
     }
 
     async publishMedia(id: string, published: boolean): Promise<void> {
-        const res = await fetch(`/api/media/${id}/publish`, {
+        const res = await this.request(`/api/media/${id}/publish`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ published }),
@@ -418,7 +448,7 @@ export class WebAdapter implements NottyAdapter {
     }
 
     async updateMediaCaption(id: string, caption: string): Promise<void> {
-        const res = await fetch(`/api/media/${id}/caption`, {
+        const res = await this.request(`/api/media/${id}/caption`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ caption }),
@@ -426,13 +456,23 @@ export class WebAdapter implements NottyAdapter {
         await assertOk(res, "Failed to update caption");
     }
 
+    /**
+     * Auth suffix for media URLs. `<img src>` can't send an `X-Session-Token`
+     * header, so token-based clients return `?token=...` (the server also
+     * accepts the session via query param). Web returns "" and relies on the
+     * same-origin cookie.
+     */
+    protected mediaQuery(): string {
+        return "";
+    }
+
     getMediaUrl(id: string): string {
-        return `/api/media/${id}/file`;
+        return `${this.apiBase}/api/media/${id}/file${this.mediaQuery()}`;
     }
 
     // Publishing
     async publishNote(noteId: string, published: boolean): Promise<void> {
-        const res = await fetch(`/api/notes/${noteId}/publish`, {
+        const res = await this.request(`/api/notes/${noteId}/publish`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ published }),
@@ -442,12 +482,12 @@ export class WebAdapter implements NottyAdapter {
 
     // Profile
     async getProfile(): Promise<Profile> {
-        const res = await fetch("/api/profile");
+        const res = await this.request("/api/profile");
         return res.json();
     }
 
     async updateProfile(data: Partial<Profile>): Promise<void> {
-        const res = await fetch("/api/profile", {
+        const res = await this.request("/api/profile", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(data),
@@ -457,5 +497,65 @@ export class WebAdapter implements NottyAdapter {
 
     createProvider(noteId: string, doc: Y.Doc, opts?: { shareToken?: string; onContentReset?: () => void }): NottyProvider {
         return new NottyProvider(noteId, doc, { connect: false, shareToken: opts?.shareToken, onContentReset: opts?.onContentReset });
+    }
+
+    /**
+     * WS query string carrying auth. Web relies on the same-origin cookie sent
+     * with the handshake, so it needs nothing. Token-based clients (mobile)
+     * override this to append `&token=...` since a WebSocket handshake can't set
+     * an `X-Session-Token` header and the `tauri://localhost` origin has no cookie.
+     */
+    protected async wsAuthQuery(): Promise<string> {
+        return "";
+    }
+
+    subscribeToNoteEvents(handler: (evt: NoteEvent) => void): () => void {
+        let ws: WebSocket | null = null;
+        let closed = false;
+        let reconnectDelay = 1000;
+        let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+
+        const connect = async () => {
+            if (closed) return;
+            let authQuery = "";
+            try { authQuery = await this.wsAuthQuery(); } catch {}
+            if (closed) return;
+            // Derive the ws origin AFTER auth resolves — mobile's apiBase can be
+            // set while loading the token. Empty apiBase = same-origin web.
+            const wsBase = this.apiBase
+                ? this.apiBase.replace(/^http/, "ws")
+                : `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
+            const url = `${wsBase}/api/sync?noteId=__events__${authQuery}`;
+
+            let sock: WebSocket;
+            try { sock = new WebSocket(url); } catch { scheduleReconnect(); return; }
+            ws = sock;
+            sock.onopen = () => { reconnectDelay = 1000; };
+            sock.onmessage = (event) => {
+                // Only string control frames (broadcastJson) matter here. The DO
+                // also sends a binary yjs syncStep1 on connect — ignore it.
+                if (typeof event.data !== "string") return;
+                let msg: any;
+                try { msg = JSON.parse(event.data); } catch { return; }
+                if (msg && typeof msg.type === "string") handler(msg as NoteEvent);
+            };
+            sock.onclose = () => { ws = null; if (!closed) scheduleReconnect(); };
+            sock.onerror = () => { try { sock.close(); } catch {} };
+        };
+
+        const scheduleReconnect = () => {
+            if (closed) return;
+            reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+            reconnectTimer = setTimeout(connect, reconnectDelay);
+        };
+
+        connect();
+
+        return () => {
+            closed = true;
+            clearTimeout(reconnectTimer);
+            try { ws?.close(); } catch {}
+            ws = null;
+        };
     }
 }

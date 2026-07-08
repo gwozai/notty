@@ -3,6 +3,7 @@ import { Sidebar } from "./sidebar";
 import { TabBar } from "./tab-bar";
 import { CommandPalette } from "./command-palette";
 import { ShortcutsHelp } from "./shortcuts-help";
+import { QuickNoteCorner } from "./quick-note-corner";
 import { useFolders } from "@/context/folders-context";
 import { useHotkeys } from "@/lib/hotkeys";
 import { toggleDarkMode } from "@/lib/dark-mode";
@@ -54,6 +55,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             </main>
             <CommandPalette />
             <ShortcutsHelp />
+            <QuickNoteCorner />
         </div>
     );
 }

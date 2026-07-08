@@ -3,6 +3,13 @@ name = "notty"
 version = "0.1.0"
 edition = "2021"
 
+# The Tauri mobile entry point lives in the library crate; the mobile
+# frameworks link against it (staticlib/cdylib), while the desktop binary
+# links against it as a normal rlib.
+[lib]
+name = "notty_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [dependencies]
 tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-shell = "2"
@@ -15,6 +22,12 @@ uuid = { version = "1", features = ["v4"] }
 dirs = "5"
 tauri-plugin-store = "2"
 tauri-plugin-deep-link = "2"
+
+# Global shortcuts are a desktop-only capability. Cargo doesn't understand the
+# Tauri `desktop` cfg (it's set by tauri-build, not a real target cfg), so gate
+# on the actual non-mobile targets or the plugin never links and its
+# permissions fail to resolve at build time.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"
 
 [build-dependencies]

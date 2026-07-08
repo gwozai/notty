@@ -45,3 +45,12 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 .vercel
+
+# October desktop — local canvas state
+.october/
+
+# October (generated — context bus / browser MCP)
+.mcp.json
+.codex/config.toml
+.codex/hooks.json
+.opencode/plugins/october-bus.js
