@@ -593,10 +593,20 @@ app.post("/api/shares", async (c) => {
     if (!session) return c.text("Unauthorized", 401);
     const { noteId, email, permission } = await c.req.json() as { noteId: string; email?: string; permission?: string };
 
-    // Verify ownership
+    // Verify ownership. A noteId lives on the user's OWN DO (keyed by their user
+    // id), so it's by definition theirs — a missing note just means it hasn't been
+    // persisted yet. The editor only autosaves once a note has non-empty text, so
+    // sharing a brand-new/empty note would otherwise 404 and the "Generate link"
+    // button would silently do nothing. Create an empty row so the share can attach.
     const userStub = c.env.USER_NOTES_DO.get(c.env.USER_NOTES_DO.idFromName(session.user.id));
     const check = await userStub.fetch(new Request(`https://do/notes/${noteId}`, { method: "HEAD" }));
-    if (check.status !== 200) return c.text("Not found or not owner", 404);
+    if (check.status !== 200) {
+        const created = await userStub.fetch(new Request("https://do/notes", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: noteId, title: "Untitled", content: "" }),
+        }));
+        if (!created.ok) return c.text("Failed to create note", 500);
+    }
 
     const authStub = c.env.AUTH_DO.get(c.env.AUTH_DO.idFromName("auth-singleton"));
     const shareToken = crypto.randomUUID();
@@ -900,8 +910,18 @@ app.get("/api/sync", async (c) => {
     if (!noteId) return c.text("Missing noteId", 400);
 
     const shareToken = new URL(c.req.url).searchParams.get("share") || undefined;
-    const access = await resolveNoteAccess(c.env, noteId, session.user.id, shareToken);
-    if (!access) return c.text("Access denied", 403);
+    let access = await resolveNoteAccess(c.env, noteId, session.user.id, shareToken);
+    if (!access) {
+        // Brand-new note that doesn't exist in any DO yet. Without a share token,
+        // the authenticated user is the one creating it on their own DO (note IDs
+        // are client-generated and the row is created on first save). Grant owner
+        // access so the initial Yjs sync succeeds instead of 403-ing — a 403 makes
+        // the client spam WebSocket errors + backoff reconnects and leaves the note
+        // without real-time/cross-device sync until the first HTTP save.
+        if (shareToken) return c.text("Access denied", 403);
+        const stub = c.env.USER_NOTES_DO.get(c.env.USER_NOTES_DO.idFromName(session.user.id));
+        access = { stub, ownerId: session.user.id, permission: "owner" };
+    }
 
     // Check lock
     const metaRes = await access.stub.fetch(new Request(`https://do/notes/${noteId}/meta`));

@@ -227,13 +227,30 @@ export class UserNotesDurableObject extends DurableObject {
             const existing = this.sql.exec("SELECT content FROM notes WHERE id = ?", noteId).toArray()[0] as any;
             if (existing?.content && !isEmptyDoc(existing.content)) content = null;
         }
-        if (content) {
+        if (content && !isEmptyDoc(content)) {
+            // Real content: UPSERT so a brand-new note persists even when the HTTP
+            // autosave never created the row (or failed, e.g. a transient 503).
+            // The row is otherwise only INSERTed by POST /api/notes, so the Yjs
+            // sync path used to silently no-op (UPDATE ... WHERE id = ? matching
+            // zero rows) for notes created straight from the list page. Making it
+            // self-sufficient closes that data-loss window.
             const title = deriveTitleAndPreview(content).title || "Untitled";
             this.sql.exec(
-                "UPDATE notes SET yjs_state = ?, content = ?, title = ?, yjs_initialized_at = COALESCE(yjs_initialized_at, unixepoch()), pending_index = 1, updated_at = unixepoch() WHERE id = ?",
-                state, content, title, noteId
+                `INSERT INTO notes (id, title, content, yjs_state, yjs_initialized_at, pending_index, updated_at)
+                 VALUES (?, ?, ?, ?, unixepoch(), 1, unixepoch())
+                 ON CONFLICT(id) DO UPDATE SET
+                   yjs_state = excluded.yjs_state,
+                   content = excluded.content,
+                   title = excluded.title,
+                   yjs_initialized_at = COALESCE(notes.yjs_initialized_at, unixepoch()),
+                   pending_index = 1,
+                   updated_at = unixepoch()`,
+                noteId, title, content, state
             );
         } else {
+            // Empty doc (or guarding existing content from an empty regression):
+            // only refresh yjs_state on a row that already exists. Never create an
+            // empty "Untitled" row — that's the "don't persist blank notes" rule.
             this.sql.exec(
                 "UPDATE notes SET yjs_state = ?, yjs_initialized_at = COALESCE(yjs_initialized_at, unixepoch()), updated_at = unixepoch() WHERE id = ?",
                 state, noteId
