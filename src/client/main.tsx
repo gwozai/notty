@@ -15,6 +15,7 @@ import { AuthPasskeyPage } from "./pages/auth-passkey";
 import { SharedResolvePage } from "./pages/shared-resolve";
 import { PublicSettingsPage } from "./pages/public-settings";
 import { MobileAuthGate } from "@/components/mobile/mobile-auth";
+import { useEdgeSwipeBack } from "@/lib/use-edge-swipe-back";
 import { MobileHomePage } from "./pages/mobile/mobile-home";
 import { MobileSearchPage } from "./pages/mobile/mobile-search";
 import { MobileSettingsPage } from "./pages/mobile/mobile-settings";
@@ -34,9 +35,12 @@ function PageFallback() {
 async function getDesktopAdapter(): Promise<NottyAdapter> {
     const { DesktopAdapter } = await import("@/lib/desktop-adapter");
     const adapter = new DesktopAdapter();
-    import("@tauri-apps/api/core")
-        .then(({ invoke }) => invoke("sync_from_markdown"))
-        .catch((e) => console.warn("[notty] Markdown startup sync failed:", e));
+    // NOTE: `sync_from_markdown` is intentionally NOT called on startup. Its
+    // importer writes the raw markdown file text straight into the `content`
+    // column, but that column must hold ProseMirror JSON — so importing turned
+    // every exported note into unparseable plain text and the editor rendered
+    // it empty (silent, corpus-wide data loss). Until the importer round-trips
+    // through a real markdown→JSON parser, the markdown mirror is EXPORT-ONLY.
     return adapter;
 }
 
@@ -62,6 +66,7 @@ function AppRoutes() {
 
 /** Native mobile routes, gated behind a passkey session. */
 function MobileRoutes() {
+    useEdgeSwipeBack();
     return (
         <MobileAuthGate>
             <Routes>
@@ -97,14 +102,21 @@ function renderApp(adapter: NottyAdapter) {
                     </AuthProvider>
                 </AdapterProvider>
             </BrowserRouter>
-            <Toaster position={isTauriMobile ? "top-center" : "bottom-center"} toastOptions={{
-                style: {
-                    fontFamily: "inherit",
-                    background: "var(--color-card)",
-                    color: "var(--color-ink)",
-                    border: "1px solid var(--color-border-warm)",
-                },
-            }} />
+            <Toaster
+                position={isTauriMobile ? "top-center" : "bottom-center"}
+                // On mobile the toaster is top-center; without an offset it renders
+                // up under the notch / Dynamic Island. Push it below the safe area.
+                offset={isTauriMobile ? "calc(env(safe-area-inset-top) + 12px)" : undefined}
+                mobileOffset={isTauriMobile ? "calc(env(safe-area-inset-top) + 12px)" : undefined}
+                toastOptions={{
+                    style: {
+                        fontFamily: "inherit",
+                        background: "var(--color-card)",
+                        color: "var(--color-ink)",
+                        border: "1px solid var(--color-border-warm)",
+                    },
+                }}
+            />
         </StrictMode>
     );
 }

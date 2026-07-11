@@ -68,7 +68,10 @@ function MobileSignIn() {
             // A notty:// deep link returns and reloads the app, signed in.
             await adapter.startPasskeySignIn();
         } catch (e: any) {
-            setError(e?.message || "Couldn't start passkey sign-in.");
+            // Tauri rejects an `Err(String)` command with the raw string (no
+            // `.message`), so surface that directly instead of a generic label.
+            const msg = typeof e === "string" ? e : e?.message;
+            setError(msg || "Couldn't start passkey sign-in.");
             setBusy(false);
         }
     };

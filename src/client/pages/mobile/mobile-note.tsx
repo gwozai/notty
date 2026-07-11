@@ -28,18 +28,43 @@ export function MobileNotePage() {
             .catch(() => setState("ready"));
     }, [id, adapter, authLoading, user]);
 
+    // Keyboard-aware height: track the visual viewport so the editor fills exactly
+    // the space *above* the software keyboard. Without this the screen stays a
+    // keyboard-agnostic 100dvh — content hides behind the keyboard, the caret
+    // drifts off-screen, and the uncovered strip shows a black bar.
+    useEffect(() => {
+        const vv = window.visualViewport;
+        if (!vv) return;
+        const apply = () => {
+            document.documentElement.style.setProperty("--kb-vh", `${vv.height}px`);
+        };
+        apply();
+        vv.addEventListener("resize", apply);
+        vv.addEventListener("scroll", apply);
+        return () => {
+            vv.removeEventListener("resize", apply);
+            vv.removeEventListener("scroll", apply);
+            document.documentElement.style.removeProperty("--kb-vh");
+        };
+    }, []);
+
     if (!id) return null;
 
-    const handleBack = () => navigate("/m");
+    // Prefer history (returns you to wherever you opened the note from — Home,
+    // Search, etc.); fall back to Home on a cold deep-link with no history.
+    const handleBack = () => (window.history.length > 1 ? navigate(-1) : navigate("/m"));
     const handleDelete = () => {
         deleteNote(id);
         navigate("/m");
     };
 
     return (
-        <div className="min-h-[100dvh] bg-[var(--color-paper)] flex flex-col">
+        <div
+            className="bg-[var(--color-paper)] flex flex-col overflow-hidden"
+            style={{ height: "var(--kb-vh, 100dvh)" }}
+        >
             <header
-                className="sticky top-0 z-30 flex items-center justify-between px-2 py-2 bg-[var(--color-paper)]/85 backdrop-blur-xl border-b border-[var(--color-border-warm)]/60"
+                className="shrink-0 z-30 flex items-center justify-between px-2 py-2 bg-[var(--color-paper)]/85 backdrop-blur-xl border-b border-[var(--color-border-warm)]/60"
                 style={{ paddingTop: "calc(env(safe-area-inset-top) + 4px)" }}
             >
                 <button
@@ -68,7 +93,14 @@ export function MobileNotePage() {
                 </div>
             </header>
 
-            <div className="flex-1" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+            {/* Momentum-scrolling editor region. Native iOS rubber-band bounce is
+                preserved (no overscroll-contain), and the generous bottom padding
+                gives headspace so the active line can scroll up to the middle of
+                the screen rather than being pinned to the bottom edge. */}
+            <div
+                className="flex-1 overflow-y-auto"
+                style={{ WebkitOverflowScrolling: "touch" }}
+            >
                 {state === "locked" ? (
                     <div className="flex flex-col items-center justify-center gap-3 px-8 pt-32 text-center">
                         <Lock size={28} className="text-[var(--color-ink-muted)]" />
@@ -80,7 +112,12 @@ export function MobileNotePage() {
                 ) : state === "checking" ? (
                     <div className="pt-24 text-center text-sm text-[var(--color-ink-muted)]">Loading…</div>
                 ) : (
-                    <Editor noteId={id} folderId={folderId} saveGuardRef={saveGuardRef} />
+                    <div
+                        className="pt-2"
+                        style={{ paddingBottom: "max(45vh, calc(env(safe-area-inset-bottom) + 33vh))" }}
+                    >
+                        <Editor noteId={id} folderId={folderId} saveGuardRef={saveGuardRef} compact />
+                    </div>
                 )}
             </div>
 

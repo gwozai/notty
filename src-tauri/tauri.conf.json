@@ -31,11 +31,15 @@
         ],
         "security": {
             "csp": null
-        }
+        },
+        "macOSPrivateApi": true
     },
     "bundle": {
         "active": true,
         "targets": ["app", "dmg"],
-        "icon": ["icons/icon.png"]
+        "icon": ["icons/icon.png"],
+        "iOS": {
+            "developmentTeam": "4QL6DTLZ34"
+        }
     }
 }

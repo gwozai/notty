@@ -28,6 +28,7 @@ import {
 import { SaveIndicator } from "./sync-status";
 import { registerNoteFlusher } from "@/lib/note-flush";
 import * as Y from "yjs";
+import { ySyncPluginKey } from "y-prosemirror";
 import Collaboration from "@tiptap/extension-collaboration";
 import CollaborationCursor from "@tiptap/extension-collaboration-cursor";
 import type { Awareness } from "y-protocols/awareness";
@@ -89,6 +90,11 @@ function wait(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// TEMP debug: route to the Tauri file logger (quick-note webview console isn't forwarded)
+function dbg(msg: string) {
+    import("@tauri-apps/api/core").then(({ invoke }) => invoke("debug_log", { msg })).catch(() => {});
+}
+
 export function Editor({ noteId, shareToken, readOnly = false, folderId, saveGuardRef, compact = false, onContentReset }: { noteId: string; shareToken?: string; readOnly?: boolean; folderId?: string | null; saveGuardRef?: React.MutableRefObject<boolean>; compact?: boolean; onContentReset?: () => void }) {
     const { saveNote } = useNotes();
     const adapter = useAdapter();
@@ -119,6 +125,11 @@ export function Editor({ noteId, shareToken, readOnly = false, folderId, saveGua
         setWordCount(text.trim() ? text.trim().split(/\s+/).length : 0);
         setCharCount(text.length);
     };
+    // Word/char counts feed only the tiny status readout, so they don't need to
+    // recompute on every keystroke. Doing so walks the whole doc and fires two
+    // state updates (a full re-render) per character — the main source of typing
+    // lag on mobile for longer notes. Debounce it; the count settles when you pause.
+    const debouncedUpdateCounts = useDebouncedCallback(updateCounts, 500);
 
     const [showLines, setShowLines] = useState<boolean>(() => {
         try { return localStorage.getItem("notty-show-lines") !== "false"; }
@@ -225,6 +236,7 @@ export function Editor({ noteId, shareToken, readOnly = false, folderId, saveGua
         const json = editor.getJSON();
         const text = editor.getText().trim();
         const content = JSON.stringify(json);
+        dbg(`saveNow note=${noteId.slice(0,8)} textLen=${text.length} loaded=${contentLoadedRef.current} unchanged=${content === lastSavedRef.current} reset=${(provider as any).reset}`);
         // Never write an empty doc before content has loaded — that's a load-race
         // wipe, not a real edit, and it corrupts the note + its version history.
         if (!text && !contentLoadedRef.current) return Promise.resolve();
@@ -336,8 +348,19 @@ export function Editor({ noteId, shareToken, readOnly = false, folderId, saveGua
             try {
                 const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
                 return parsed?.type === "doc" && parsed.content?.length ? parsed : null;
-            } catch (e) {
-                console.warn("[notty] Failed to parse bootstrap content:", e);
+            } catch {
+                // Not JSON — plain text/markdown leaked into the content column
+                // (legacy markdown-sync corruption). Recover the text as a doc
+                // instead of showing an empty note; the next save rewrites it as
+                // proper JSON, self-healing the row.
+                if (typeof raw === "string" && raw.trim()) {
+                    const paragraphs = raw
+                        .split(/\n{2,}/)
+                        .map((block) => block.replace(/\n/g, " ").trim())
+                        .filter(Boolean)
+                        .map((text) => ({ type: "paragraph", content: [{ type: "text", text }] }));
+                    return paragraphs.length ? { type: "doc", content: paragraphs } : null;
+                }
                 return null;
             }
         };
@@ -350,7 +373,15 @@ export function Editor({ noteId, shareToken, readOnly = false, folderId, saveGua
             if (cancelled || !parsed || hasContent()) return;
             const ed = editorRef.current;
             if (ed) {
-                if (!ed.getText().trim()) ed.commands.setContent(parsed);
+                if (!ed.getText().trim()) {
+                    ed.commands.setContent(parsed);
+                    // Mark the just-loaded snapshot as already-saved. Otherwise the
+                    // seeded content differs from lastSavedRef (still the empty-doc
+                    // JSON from onCreate), so the next flush (unmount/interval/blur)
+                    // writes it back and bumps updated_at — floating an unedited
+                    // note to the top of the list every time it's opened.
+                    lastSavedRef.current = JSON.stringify(ed.getJSON());
+                }
             } else {
                 bootstrapRef.current = parsed;
             }
@@ -364,13 +395,30 @@ export function Editor({ noteId, shareToken, readOnly = false, folderId, saveGua
         }
 
         if (isTauri) {
-            // Desktop is local-first: SQLite is the single seed path. Render
-            // immediately, then seed the snapshot once it's read.
-            setReady(true);
-            adapter.getNote(noteId).catch(() => null).then((data: any) => {
-                seed(parseDoc(data?.content));
-                if (!cancelled) contentLoadedRef.current = true;
-            });
+            // Desktop is local-first: SQLite is the single seed path. Read it,
+            // stash into bootstrapRef, THEN render. Seeding at onCreate is the
+            // ONLY reliable way to populate a Collaboration/Yjs editor — calling
+            // editor.commands.setContent() on an already-created collab editor
+            // silently no-ops (the y-sync plugin owns the doc), which is exactly
+            // why cycling back to a note rendered it blank even though SQLite
+            // still held the text. Use the fast local get_note directly (no cloud
+            // fallback) so a brand-new note renders instantly.
+            (async () => {
+                let content: string | undefined;
+                try {
+                    const { invoke } = await import("@tauri-apps/api/core");
+                    const local = await invoke<{ content?: string } | null>("get_note", { id: noteId });
+                    content = local?.content;
+                } catch (e) {
+                    console.warn("[notty] Desktop bootstrap read failed:", e);
+                }
+                if (cancelled) return;
+                const parsed = parseDoc(content);
+                dbg(`bootstrap note=${noteId.slice(0,8)} dbContentLen=${content?.length ?? "null"} parsed=${!!parsed}`);
+                if (parsed) bootstrapRef.current = parsed;
+                contentLoadedRef.current = true;
+                setReady(true);
+            })();
             return () => { cancelled = true; };
         }
 
@@ -444,6 +492,7 @@ export function Editor({ noteId, shareToken, readOnly = false, folderId, saveGua
     useEffect(() => () => {
         // On content reset (checkout/restore/merge), cancel pending saves
         // so they don't overwrite the new content. Otherwise flush normally.
+        dbg(`unmount note=${noteId.slice(0,8)} guard=${!!saveGuardRef?.current} editorText=${editorRef.current ? JSON.stringify(editorRef.current.getText().slice(0,20)) : "no-editor"}`);
         if (saveGuardRef?.current) {
             debouncedSave.cancel();
             saveGuardRef.current = false;
@@ -567,9 +616,19 @@ export function Editor({ noteId, shareToken, readOnly = false, folderId, saveGua
                             class: `focus:outline-none max-w-full ${compact ? "min-h-[180px]" : "min-h-[400px]"} ${readOnly ? "select-text" : ""}`,
                         },
                     }}
-                    onUpdate={({ editor }) => {
+                    onUpdate={({ editor, transaction }) => {
+                        // A Yjs-sync transaction (IndexedDB load or remote update)
+                        // carries isChangeOrigin — that's content *arriving*, not a
+                        // user edit. Persisting it would bump updated_at just from
+                        // opening a note (floating it to the top of the list). Only
+                        // keep lastSavedRef current so real edits are still detected.
+                        if (transaction?.getMeta(ySyncPluginKey)?.isChangeOrigin) {
+                            lastSavedRef.current = JSON.stringify(editor.getJSON());
+                            updateCounts(editor);
+                            return;
+                        }
                         if (!readOnly) debouncedSave(editor);
-                        updateCounts(editor);
+                        debouncedUpdateCounts(editor);
                     }}
                     onCreate={({ editor }) => {
                         editorRef.current = editor;

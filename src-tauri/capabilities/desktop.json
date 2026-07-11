@@ -1,0 +1,11 @@
+{
+    "identifier": "desktop",
+    "description": "Desktop-only capabilities (global shortcuts). The global-shortcut plugin is not compiled on iOS/Android, so its permissions must be scoped to desktop platforms or the mobile build fails permission resolution.",
+    "platforms": ["macOS", "windows", "linux"],
+    "windows": ["*"],
+    "permissions": [
+        "global-shortcut:allow-register",
+        "global-shortcut:allow-unregister",
+        "global-shortcut:allow-is-registered"
+    ]
+}

@@ -159,9 +159,20 @@ pub fn save_note(
 ) -> Result<Note, String> {
     let sync_mode = sync_mode.unwrap_or_else(|| "cloud".to_string());
     let conn = db.0.lock().map_err(|e| e.to_string())?;
+    // Guard against the empty-over-nonempty clobber: a save carrying empty
+    // content must never blank a note that already has content (a late/stale
+    // `createNote("")`, a load-race, or a cross-webview echo). When that
+    // happens we keep the existing content, title, and updated_at untouched so
+    // the write is a no-op for content — only a genuinely non-empty edit, or the
+    // first write of a brand-new row, can set content. Folder/sync still update.
     conn.execute(
         "INSERT INTO notes (id, title, content, folder_id, sync_mode, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, unixepoch())
-         ON CONFLICT(id) DO UPDATE SET title = excluded.title, content = excluded.content, folder_id = excluded.folder_id, sync_mode = excluded.sync_mode, updated_at = unixepoch()",
+         ON CONFLICT(id) DO UPDATE SET
+             title      = CASE WHEN excluded.content = '' AND notes.content != '' THEN notes.title      ELSE excluded.title      END,
+             content    = CASE WHEN excluded.content = '' AND notes.content != '' THEN notes.content    ELSE excluded.content    END,
+             folder_id  = excluded.folder_id,
+             sync_mode  = excluded.sync_mode,
+             updated_at = CASE WHEN excluded.content = '' AND notes.content != '' THEN notes.updated_at ELSE unixepoch() END",
         params![id, title, content, folder_id, sync_mode],
     )
     .map_err(|e| e.to_string())?;
@@ -263,7 +274,9 @@ pub fn save_folder(
 pub fn get_quick_notes(db: tauri::State<Database>) -> Result<Vec<Note>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT id, title, content, folder_id, sync_mode, created_at, updated_at FROM notes WHERE folder_id = '__quick_notes__' AND deleted_at IS NULL ORDER BY updated_at DESC")
+        // Order by created_at (stable) not updated_at — otherwise a note jumps
+        // position the instant you type in it, which reshuffles the ⌘[/⌘] cycle.
+        .prepare("SELECT id, title, content, folder_id, sync_mode, created_at, updated_at FROM notes WHERE folder_id = '__quick_notes__' AND deleted_at IS NULL ORDER BY created_at DESC")
         .map_err(|e| e.to_string())?;
     let notes = stmt
         .query_map([], |row| {

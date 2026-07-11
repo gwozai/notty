@@ -20,7 +20,7 @@ export function MobileTrashPage() {
                 style={{ paddingTop: "calc(env(safe-area-inset-top) + 4px)" }}
             >
                 <button
-                    onClick={() => navigate("/m/settings")}
+                    onClick={() => (window.history.length > 1 ? navigate(-1) : navigate("/m/settings"))}
                     className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[var(--color-ink-muted)] active:bg-[var(--color-sidebar-active)] transition-colors"
                     aria-label="Back"
                 >

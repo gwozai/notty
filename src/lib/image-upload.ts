@@ -1,5 +1,6 @@
 import { createImageUpload } from "novel";
 import { toast } from "sonner";
+import { getActiveAdapter } from "@/context/adapter-context";
 
 const MAX_SIZE_MB = 50;
 
@@ -39,17 +40,34 @@ export const uploadFn = createImageUpload({
     },
     onUpload: async (file) => {
         const dimensions = await getImageDimensions(file);
-        const form = new FormData();
-        form.append("file", file);
-        if (dimensions) {
-            form.append("width", String(dimensions.width));
-            form.append("height", String(dimensions.height));
-        }
 
-        const promise = fetch("/api/media", { method: "POST", body: form }).then(async (res) => {
-            if (!res.ok) throw new Error(await res.text().catch(() => "Upload failed"));
-            const media = (await res.json()) as { id: string };
-            const src = `/api/media/${media.id}/file`;
+        // Route through the active adapter so the request hits the correct origin
+        // with the correct auth. On mobile the webview origin is NOT notty.page and
+        // auth is an `X-Session-Token` header — a raw same-origin `fetch("/api/media")`
+        // there resolves to the wrong place and WebKit throws "the string did not
+        // match the expected pattern". The adapter also builds the display URL with
+        // the right base + media auth query, so images render on mobile too.
+        const adapter = getActiveAdapter();
+
+        const promise = (async () => {
+            let mediaId: string;
+            let src: string;
+            if (adapter) {
+                const media = await adapter.uploadMedia(file, dimensions);
+                mediaId = media.id;
+                src = adapter.getMediaUrl(mediaId);
+            } else {
+                const form = new FormData();
+                form.append("file", file);
+                if (dimensions) {
+                    form.append("width", String(dimensions.width));
+                    form.append("height", String(dimensions.height));
+                }
+                const res = await fetch("/api/media", { method: "POST", body: form });
+                if (!res.ok) throw new Error(await res.text().catch(() => "Upload failed"));
+                mediaId = ((await res.json()) as { id: string }).id;
+                src = `/api/media/${mediaId}/file`;
+            }
             // Preload so the swap from placeholder → image is instant and
             // novel can measure the loaded element.
             return new Promise<string>((resolve) => {
@@ -58,7 +76,7 @@ export const uploadFn = createImageUpload({
                 img.onload = () => resolve(src);
                 img.onerror = () => resolve(src);
             });
-        });
+        })();
 
         toast.promise(promise, {
             loading: "Uploading image…",

@@ -14,4 +14,8 @@ Onboarding, a wizard, "a few screens", steps, a set of screens — **create one 
 ## Dependencies
 
 When you import a new package, add it to `package.json` in the same change (for Expo / React Native, run `npx expo install <pkg>` so it picks a compatible version and writes `package.json` for you). Anything missing from `package.json` disappears on a clean install and crashes the app.
+
+## Working with other agents
+
+If you're connected to October's bus (the october-bus MCP tools), you can bring on helper agents instead of doing everything yourself. When a task splits into independent parts, `add_terminal` (or `add_chat`) with an `agent` for each part — use `isolate:true` when several will touch the same repo — then drive each with `send_to_node` and coordinate via `message_peer`. A spawned agent is auto-connected to you, so you can message it right away; `wait_for_nodes` fans work back in when they finish.
 <!-- october:canvas-guide:end -->

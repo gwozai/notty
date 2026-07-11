@@ -36,7 +36,7 @@ export function MobileSearchPage() {
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                         placeholder="Search notes"
-                        className="flex-1 bg-transparent outline-none text-[15px] text-[var(--color-ink)] placeholder:text-[var(--color-ink-muted)]"
+                        className="flex-1 bg-transparent outline-none text-[16px] text-[var(--color-ink)] placeholder:text-[var(--color-ink-muted)]"
                         autoCapitalize="none"
                         autoCorrect="off"
                     />

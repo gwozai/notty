@@ -3,7 +3,7 @@
   "mcp": {
     "october-bus": {
       "type": "remote",
-      "url": "http://127.0.0.1:58349/mcp",
+      "url": "http://127.0.0.1:62321/mcp",
       "enabled": true,
       "headers": {
         "X-October-Canvas": "{env:OCTOBER_BUS_CANVAS}",

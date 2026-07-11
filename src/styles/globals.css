@@ -19,6 +19,13 @@
 
 html {
     scroll-behavior: smooth;
+    /* Paint the root paper-coloured too. When the iOS keyboard opens, any area
+       the app content doesn't cover falls through to the html/webview background
+       — if that's left default it shows as a black bar under the keyboard. The
+       `.dark` class lives on <html>, so this resolves to the right paper shade. */
+    background-color: var(--color-paper);
+    /* No grey flash on tap anywhere — buttons use their own active: styles. */
+    -webkit-tap-highlight-color: transparent;
 }
 
 body {
@@ -62,6 +69,11 @@ body::before {
     color: var(--color-ink);
     font-size: 1.125rem;
     line-height: 1.75;
+    /* Keep iOS from auto-inflating text on rotation and flashing a grey box on
+       tap — both make on-device writing feel janky. */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .ProseMirror > * + * { margin-top: 0.75em; }
