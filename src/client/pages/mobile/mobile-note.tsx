@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router";
-import { ArrowLeft, Share2, Trash2, Lock } from "lucide-react";
+import { ArrowLeft, Trash2, Lock } from "lucide-react";
 import { Editor } from "@/components/editor";
-import { ShareDialog } from "@/components/share-dialog";
 import { useNotes } from "@/context/notes-context";
 import { useAdapter } from "@/context/adapter-context";
 import { useAuth } from "@/context/auth-context";
@@ -17,7 +16,6 @@ export function MobileNotePage() {
 
     const folderId = searchParams.get("folder") ?? undefined;
     const saveGuardRef = useRef(false);
-    const [showShare, setShowShare] = useState(false);
     const [state, setState] = useState<"checking" | "locked" | "ready">("checking");
 
     useEffect(() => {
@@ -76,16 +74,13 @@ export function MobileNotePage() {
                     <span className="font-serif italic text-[15px]">notty</span>
                 </button>
                 <div className="flex items-center gap-0.5">
-                    <button
-                        onClick={() => setShowShare(true)}
-                        className="p-2 rounded-lg text-[var(--color-ink-muted)] active:bg-[var(--color-sidebar-active)] transition-colors"
-                        aria-label="Share"
-                    >
-                        <Share2 size={19} />
-                    </button>
+                    {/* Sharing / public publishing is intentionally not exposed in
+                        the iOS app for the first App Store release (avoids the
+                        user-generated-content moderation requirements). Notes can
+                        still be shared from notty.page. */}
                     <button
                         onClick={handleDelete}
-                        className="p-2 rounded-lg text-red-500 active:bg-red-500/10 transition-colors"
+                        className="p-2.5 rounded-lg text-red-500 active:bg-red-500/10 transition-colors"
                         aria-label="Delete note"
                     >
                         <Trash2 size={19} />
@@ -121,7 +116,6 @@ export function MobileNotePage() {
                 )}
             </div>
 
-            {showShare && <ShareDialog noteId={id} onClose={() => setShowShare(false)} />}
         </div>
     );
 }

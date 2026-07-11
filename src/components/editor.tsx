@@ -632,6 +632,8 @@ export function Editor({ noteId, shareToken, readOnly = false, folderId, saveGua
                     }}
                     onCreate={({ editor }) => {
                         editorRef.current = editor;
+                        const willSeed = !!bootstrapRef.current && !editor.getText().trim();
+                        dbg(`onCreate note=${noteId.slice(0,8)} willSeed=${willSeed} existingText=${JSON.stringify(editor.getText().slice(0,15))}`);
                         if (bootstrapRef.current && !editor.getText().trim()) {
                             editor.commands.setContent(bootstrapRef.current);
                             bootstrapRef.current = null;
