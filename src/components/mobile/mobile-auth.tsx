@@ -85,7 +85,7 @@ function MobileSignIn() {
                 <div className="space-y-2">
                     <h1 className="font-serif italic text-5xl text-[var(--color-ink)]">notty</h1>
                     <p className="text-sm text-[var(--color-ink-muted)]">
-                        Your notes, synced everywhere. Sign in with a passkey to continue.
+                        Your notes, synced everywhere. Sign in or create an account to continue.
                     </p>
                 </div>
                 <button
@@ -94,7 +94,7 @@ function MobileSignIn() {
                     className="w-full flex items-center justify-center gap-2.5 py-3.5 rounded-2xl text-[15px] font-medium bg-[var(--color-ink)] text-[var(--color-paper)] active:scale-[0.97] transition-transform disabled:opacity-60"
                 >
                     <PasskeyIcon />
-                    {busy ? "Continue in browser…" : "Sign in with Passkey"}
+                    {busy ? "Continue in browser…" : "Get started"}
                 </button>
                 {busy && (
                     <p className="text-xs text-[var(--color-ink-muted)]">

@@ -211,6 +211,21 @@ export class AuthDurableObject extends DurableObject {
             return this.handleProfile(request, url);
         }
 
+        // Internal: hard-delete a user and everything attached to them. Used by
+        // the in-app "Delete account" flow (App Store guideline 5.1.1(v)).
+        if (url.pathname === "/internal/delete-user" && request.method === "POST") {
+            const { userId } = await request.json() as { userId: string };
+            if (!userId) return new Response("Missing userId", { status: 400 });
+            const sql = this.ctx.storage.sql;
+            sql.exec(`DELETE FROM "session" WHERE user_id = ?`, userId);
+            sql.exec(`DELETE FROM "account" WHERE user_id = ?`, userId);
+            sql.exec(`DELETE FROM "passkey" WHERE user_id = ?`, userId);
+            sql.exec(`DELETE FROM "share" WHERE owner_id = ? OR shared_with_id = ?`, userId, userId);
+            sql.exec(`DELETE FROM "profile" WHERE user_id = ?`, userId);
+            sql.exec(`DELETE FROM "user" WHERE id = ?`, userId);
+            return Response.json({ ok: true });
+        }
+
         // Internal user lookup
         if (url.pathname === "/internal/user-by-email") {
             const email = url.searchParams.get("email");

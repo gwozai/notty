@@ -124,6 +124,11 @@ export class WebAdapter implements NottyAdapter {
         await authClient.signOut();
     }
 
+    async deleteAccount(): Promise<void> {
+        const res = await this.request("/api/auth/delete-account", { method: "DELETE" });
+        await assertOk(res, "Failed to delete account");
+    }
+
     async getCachedNotesList(): Promise<Note[]> {
         const cached = await getCachedNotes();
         return cached.map((n) => ({ ...n, content: "" }));

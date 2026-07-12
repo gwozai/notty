@@ -593,6 +593,15 @@ export class UserNotesDurableObject extends DurableObject {
             return Response.json({ ok: true });
         }
 
+        // Account deletion: hand back every R2 media key so the caller can purge
+        // the bucket, then wipe this user's entire notes store (notes, folders,
+        // media rows, version history, Yjs state — everything in this DO).
+        if (request.method === "POST" && path === "/purge") {
+            const r2Keys = this.sql.exec("SELECT r2_key FROM media").toArray().map((r: any) => r.r2_key);
+            await this.ctx.storage.deleteAll();
+            return Response.json({ ok: true, r2Keys });
+        }
+
         // Note routes
         if (request.method === "GET" && path === "/notes") {
             return Response.json(this.getAllNotes());

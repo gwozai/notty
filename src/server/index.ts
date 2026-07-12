@@ -291,6 +291,29 @@ const requireAuth = async (c: any, next: any) => {
 app.use("/api/notes/*", requireAuth);
 app.use("/api/notes-trash", requireAuth);
 app.use("/api/folders/*", requireAuth);
+
+// --- Account deletion (App Store guideline 5.1.1(v): in-app account delete) ---
+// Purges everything: R2 media objects, the user's entire notes DO, and every
+// auth row (user/session/account/passkey/share/profile). Irreversible.
+app.delete("/api/auth/delete-account", requireAuth, async (c) => {
+    const userId = c.var.userId as string;
+    // 1. Wipe the user's notes DO and get back its R2 media keys.
+    const purgeRes = await c.var.userStub.fetch(
+        new Request("https://do/purge", { method: "POST" })
+    );
+    if (purgeRes.ok) {
+        const { r2Keys } = await purgeRes.json() as { r2Keys: string[] };
+        // 2. Delete each media object from R2.
+        await Promise.all((r2Keys || []).map((k) => c.env.MEDIA_BUCKET.delete(k).catch(() => {})));
+    }
+    // 3. Delete all auth records for the user (also revokes their sessions).
+    const authStub = c.env.AUTH_DO.get(c.env.AUTH_DO.idFromName("auth-singleton"));
+    await authStub.fetch(new Request("https://do/internal/delete-user", {
+        method: "POST",
+        body: JSON.stringify({ userId }),
+    }));
+    return c.json({ ok: true });
+});
 // --- Notes API ---
 app.get("/api/notes/list", (c) => c.var.userStub.fetch(new Request("https://do/notes/list")));
 app.get("/api/notes", (c) => c.var.userStub.fetch(new Request("https://do/notes")));

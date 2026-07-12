@@ -181,6 +181,9 @@ export interface NottyAdapter {
     updateMediaCaption(id: string, caption: string): Promise<void>;
     getMediaUrl(id: string): string;
 
+    // Account
+    deleteAccount(): Promise<void>;
+
     // Publishing
     publishNote(noteId: string, published: boolean): Promise<void>;
 
