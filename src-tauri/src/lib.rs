@@ -290,20 +290,6 @@ fn open_external_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
     Ok(())
 }
 
-// TEMP debug: the quick-note webview's console isn't forwarded to the dev
-// server, so trace to a file we can tail.
-#[tauri::command]
-fn debug_log(msg: String) {
-    use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/notty-qn-debug.log")
-    {
-        let _ = writeln!(f, "{}", msg);
-    }
-}
-
 #[tauri::command]
 fn open_note_in_main(app: tauri::AppHandle, note_id: String) -> Result<(), String> {
     if let Some(win) = app.get_webview_window("main") {
@@ -412,7 +398,6 @@ pub fn run() {
             db::delete_folder,
             db::get_quick_notes,
             open_note_in_main,
-            debug_log,
             open_external_url,
             toggle_quick_note,
             quick_note_corner_conflict,

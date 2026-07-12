@@ -1,4 +1,4 @@
-import { StrictMode, lazy, Suspense } from "react";
+import { lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router";
 import { AdapterProvider } from "@/context/adapter-context";
@@ -86,7 +86,14 @@ function MobileRoutes() {
 
 function renderApp(adapter: NottyAdapter) {
     createRoot(document.getElementById("root")!).render(
-        <StrictMode>
+        // NOTE: StrictMode intentionally OFF. Its dev-only double-mount destroys
+        // and then reuses each editor's Yjs doc (created in useMemo, torn down by
+        // a sibling effect's cleanup), so the collab editor rebinds to a dead doc
+        // and edits silently stop registering — most visible in the rapidly
+        // remounting quick-note cycler. Production never double-mounts, so this
+        // only aligns dev with prod behavior. A StrictMode-safe doc lifecycle is
+        // tracked as part of the desktop-Yjs-client work.
+        <>
             <BrowserRouter>
                 <AdapterProvider adapter={adapter}>
                     <AuthProvider>
@@ -117,7 +124,7 @@ function renderApp(adapter: NottyAdapter) {
                     },
                 }}
             />
-        </StrictMode>
+        </>
     );
 }
 

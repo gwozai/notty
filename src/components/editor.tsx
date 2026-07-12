@@ -90,11 +90,6 @@ function wait(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// TEMP debug: route to the Tauri file logger (quick-note webview console isn't forwarded)
-function dbg(msg: string) {
-    import("@tauri-apps/api/core").then(({ invoke }) => invoke("debug_log", { msg })).catch(() => {});
-}
-
 export function Editor({ noteId, shareToken, readOnly = false, folderId, saveGuardRef, compact = false, onContentReset }: { noteId: string; shareToken?: string; readOnly?: boolean; folderId?: string | null; saveGuardRef?: React.MutableRefObject<boolean>; compact?: boolean; onContentReset?: () => void }) {
     const { saveNote } = useNotes();
     const adapter = useAdapter();
@@ -236,7 +231,6 @@ export function Editor({ noteId, shareToken, readOnly = false, folderId, saveGua
         const json = editor.getJSON();
         const text = editor.getText().trim();
         const content = JSON.stringify(json);
-        dbg(`saveNow note=${noteId.slice(0,8)} textLen=${text.length} loaded=${contentLoadedRef.current} unchanged=${content === lastSavedRef.current} reset=${(provider as any).reset}`);
         // Never write an empty doc before content has loaded — that's a load-race
         // wipe, not a real edit, and it corrupts the note + its version history.
         if (!text && !contentLoadedRef.current) return Promise.resolve();
@@ -414,7 +408,6 @@ export function Editor({ noteId, shareToken, readOnly = false, folderId, saveGua
                 }
                 if (cancelled) return;
                 const parsed = parseDoc(content);
-                dbg(`bootstrap note=${noteId.slice(0,8)} dbContentLen=${content?.length ?? "null"} parsed=${!!parsed}`);
                 if (parsed) bootstrapRef.current = parsed;
                 contentLoadedRef.current = true;
                 setReady(true);
@@ -492,7 +485,6 @@ export function Editor({ noteId, shareToken, readOnly = false, folderId, saveGua
     useEffect(() => () => {
         // On content reset (checkout/restore/merge), cancel pending saves
         // so they don't overwrite the new content. Otherwise flush normally.
-        dbg(`unmount note=${noteId.slice(0,8)} guard=${!!saveGuardRef?.current} editorText=${editorRef.current ? JSON.stringify(editorRef.current.getText().slice(0,20)) : "no-editor"}`);
         if (saveGuardRef?.current) {
             debouncedSave.cancel();
             saveGuardRef.current = false;
@@ -632,8 +624,6 @@ export function Editor({ noteId, shareToken, readOnly = false, folderId, saveGua
                     }}
                     onCreate={({ editor }) => {
                         editorRef.current = editor;
-                        const willSeed = !!bootstrapRef.current && !editor.getText().trim();
-                        dbg(`onCreate note=${noteId.slice(0,8)} willSeed=${willSeed} existingText=${JSON.stringify(editor.getText().slice(0,15))}`);
                         if (bootstrapRef.current && !editor.getText().trim()) {
                             editor.commands.setContent(bootstrapRef.current);
                             bootstrapRef.current = null;

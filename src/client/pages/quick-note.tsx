@@ -160,8 +160,7 @@ export function QuickNotePage() {
         if (n < 2) return;
         const cur = notes[currentIndexRef.current];
         const move = () => setCurrentIndex((i) => (i + delta + n) % n);
-        tauriInvoke("debug_log", { msg: `switchBy delta=${delta} from=${cur?.id?.slice(0,8)} count=${n}` }).catch(() => {});
-        if (cur) flushNote(cur.id).then(() => tauriInvoke("debug_log", { msg: `flush done ${cur.id.slice(0,8)}` }).catch(() => {})).catch(() => {}).finally(move);
+        if (cur) flushNote(cur.id).catch(() => {}).finally(move);
         else move();
     }, []);
 
