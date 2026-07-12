@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Moon, Sun, LogOut, Globe, ChevronRight, Trash2, UserX } from "lucide-react";
+import { Moon, Sun, LogOut, Globe, ChevronRight, Trash2, UserX, Shield } from "lucide-react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { useAuth } from "@/context/auth-context";
@@ -108,6 +108,12 @@ export function MobileSettingsPage() {
                             icon={<Globe size={18} />}
                             label="Open notty.page"
                             onClick={() => openExternal("https://notty.page")}
+                            right={<ChevronRight size={16} className="text-[var(--color-ink-muted)]/50" />}
+                        />
+                        <Row
+                            icon={<Shield size={18} />}
+                            label="Privacy Policy"
+                            onClick={() => openExternal("https://notty.page/privacy")}
                             right={<ChevronRight size={16} className="text-[var(--color-ink-muted)]/50" />}
                         />
                     </Card>

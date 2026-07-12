@@ -29,6 +29,52 @@ app.use("*", cors({
     allowHeaders: ["Content-Type", "Authorization", "X-Lock-Token", "X-Session-Token"],
 }));
 
+// Privacy policy — required for App Store submission (privacy policy URL) and
+// linked from in-app Settings. Served as a stable, self-contained HTML page.
+app.get("/privacy", (c) => {
+    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notty — Privacy Policy</title>
+<style>
+  :root{color-scheme:light dark}
+  body{max-width:44rem;margin:0 auto;padding:3rem 1.25rem;font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#1a1a1a;background:#faf8f5}
+  @media (prefers-color-scheme:dark){body{color:#e8e4dc;background:#181715}}
+  h1{font-size:1.9rem;margin-bottom:.25rem}h2{margin-top:2rem;font-size:1.2rem}
+  .muted{opacity:.6;font-size:.9rem}a{color:#c2691d}
+</style></head><body>
+<h1>Privacy Policy</h1>
+<p class="muted">Notty · Last updated 2026</p>
+<p>Notty is a note-taking app. This policy explains what we collect and why.</p>
+<h2>What we collect</h2>
+<ul>
+  <li><strong>Account information</strong> — when you sign in with Apple, Google, GitHub, or a passkey, we store your name, email address, and an account identifier so we can keep your notes associated with you.</li>
+  <li><strong>Your content</strong> — the notes, folders, and images you create are stored so they sync across your devices.</li>
+</ul>
+<h2>How your content is used</h2>
+<p>Your notes and images are stored to provide the syncing service. If you use AI/search features, note content may be sent to our processing providers (Supermemory and Anthropic) solely to power those features. We do not sell your data, and we do not use third-party advertising or tracking SDKs.</p>
+<h2>Where it is stored</h2>
+<p>Data is hosted on Cloudflare infrastructure. Traffic is encrypted in transit over HTTPS.</p>
+<h2>Deleting your account</h2>
+<p>You can permanently delete your account and all associated notes, images, and folders at any time from <strong>Settings → Delete account</strong> in the app, or by contacting us. Deletion is immediate and irreversible.</p>
+<h2>Contact</h2>
+<p>Questions? Email <a href="mailto:support@notty.page">support@notty.page</a>.</p>
+</body></html>`;
+    return c.html(html);
+});
+
+// Apple App Site Association — enables passkeys (webcredentials) and Universal
+// Links (applinks) for the iOS app. Must be served as application/json with no
+// redirect. appID = <TeamID>.<bundleID>.
+app.get("/.well-known/apple-app-site-association", (c) =>
+    c.json({
+        applinks: {
+            apps: [],
+            details: [{ appID: "4QL6DTLZ34.dev.notty.app", paths: ["/auth/*", "/shared/*"] }],
+        },
+        webcredentials: { apps: ["4QL6DTLZ34.dev.notty.app"] },
+    })
+);
+
 // --- Subdomain detection for public pages ---
 const PUBLIC_DOMAINS = ["notty.page", "notty.dhr.wtf"];
 
